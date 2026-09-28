@@ -37,7 +37,8 @@ type OllamaChatChunk struct {
 
 func main() {
 	log.Println("Building request...")
-	address := os.Getenv("OLLAMASERVER")
+	server := os.Getenv("OLLAMASERVER")
+	address := server + "/api/chat"
 	contentType := "application/json"
 	//query := "Hello! I'm testing out Ollama. Please list out the first 10 digits of the fibonnaci sequcence, and then tell me a joke."
 	query := "Explain how a reverse proxy handles an HTTPS request. Describe each step in order and include one example. Write at least 150 words."
