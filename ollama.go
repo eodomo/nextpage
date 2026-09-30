@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net/http"
 	"net/url"
@@ -23,18 +22,12 @@ func (t *basicAuthTransport) RoundTrip(req *http.Request) (*http.Response, error
 	return t.base.RoundTrip(req)
 }
 
-func SendRequest(prompt string) {
+func buildHttpClient() *http.Client {
 	log.Println("Building request...")
-	server := os.Getenv("OLLAMASERVER")
-	model := os.Getenv("MODEL")
 	username := os.Getenv("USER")
 	password := os.Getenv("PASS")
-	if server == "" || username == "" || password == "" {
-		log.Fatal("set OLLAMASERVER, MODEL, USER, and PASS")
-	}
-	baseUrl, err := url.Parse(server)
-	if err != nil {
-		log.Fatal(err)
+	if username == "" || password == "" {
+		log.Fatal("set USER and PASS")
 	}
 
 	httpClient := &http.Client{
@@ -44,6 +37,23 @@ func SendRequest(prompt string) {
 			base:     http.DefaultTransport,
 		},
 	}
+
+	return httpClient
+}
+
+func SendRequest(prompt string, onChunk func(string) error) error {
+	log.Println("Building request...")
+	server := os.Getenv("OLLAMASERVER")
+	model := os.Getenv("MODEL")
+	if server == "" || model == "" {
+		log.Fatal("set OLLAMASERVER and MODEL")
+	}
+	baseUrl, err := url.Parse(server)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	httpClient := buildHttpClient()
 	client := api.NewClient(baseUrl, httpClient)
 
 	ctx := context.Background()
@@ -57,11 +67,14 @@ func SendRequest(prompt string) {
 			Stream: &stream,
 		},
 		func(resp api.GenerateResponse) error {
-			fmt.Print(resp.Response)
-			return nil
+			if resp.Response == "" {
+				return nil
+			}
+			return onChunk(resp.Response)
 		},
 	)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
+	return nil
 }
