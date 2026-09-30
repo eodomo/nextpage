@@ -1,4 +1,4 @@
-module ollama_demo
+module github.com/eodomo/nextpage
 
 go 1.27.1
 
