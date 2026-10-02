@@ -41,12 +41,11 @@ func buildHttpClient() *http.Client {
 	return httpClient
 }
 
-func SendRequest(prompt string, onChunk func(string) error) error {
+func SendRequest(prompt string, model string, onChunk func(string) error) error {
 	log.Println("Building request...")
 	server := os.Getenv("OLLAMASERVER")
-	model := os.Getenv("MODEL")
-	if server == "" || model == "" {
-		log.Fatal("set OLLAMASERVER and MODEL")
+	if server == "" {
+		log.Fatal("set OLLAMASERVER")
 	}
 	baseUrl, err := url.Parse(server)
 	if err != nil {

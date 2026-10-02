@@ -1,6 +1,9 @@
 package main
 
 import (
+	"log"
+	"math/rand"
+	"os"
 	"strings"
 
 	"charm.land/bubbles/v2/cursor"
@@ -20,11 +23,11 @@ type chunkMsg string
 type requestErrorMsg struct{ err error }
 type requestDoneMsg struct{ err error }
 
-func (m model) runRequest(prompt string, events chan<- streamEvent) tea.Cmd {
+func (m model) runRequest(prompt string, model string, events chan<- streamEvent) tea.Cmd {
 	return func() tea.Msg {
 		defer close(events)
 
-		err := SendRequest(prompt, func(chunk string) error {
+		err := SendRequest(prompt, model, func(chunk string) error {
 			events <- streamEvent{chunk: chunk}
 			return nil
 		})
@@ -51,19 +54,43 @@ func waitForEvent(events <-chan streamEvent) tea.Cmd {
 type statusLine struct {
 	spinner     spinner.Model
 	loadingText string
-	aiModel     string
+}
+
+func getRandomSpinner() spinner.Spinner {
+	spinners := []spinner.Spinner{
+		spinner.Line,
+		spinner.Dot,
+		spinner.MiniDot,
+		spinner.Jump,
+		spinner.Points,
+		spinner.Globe,
+		spinner.Moon,
+		spinner.Monkey,
+		spinner.Meter,
+		spinner.Ellipsis,
+	}
+
+	randomIndex := rand.Intn(len(spinners))
+	return spinners[randomIndex]
+
 }
 
 type model struct {
-	viewport   viewport.Model
-	messages   []string
-	textarea   textarea.Model
-	events     chan streamEvent
-	statusLine statusLine
-	err        error
+	viewport    viewport.Model
+	messages    []string
+	aiModel     string
+	textarea    textarea.Model
+	events      chan streamEvent
+	statusLine  statusLine
+	borderStyle lipgloss.Style
+	err         error
 }
 
 func initialModel() model {
+	aiModel := os.Getenv("MODEL")
+	if aiModel == "" {
+		log.Fatal("set MODEL")
+	}
 	ta := textarea.New()
 	ta.Placeholder = "Send a message..."
 	ta.SetVirtualCursor(true)
@@ -91,21 +118,24 @@ Type a message and press Enter to send.`)
 	ta.KeyMap.InsertNewline.SetEnabled(false)
 
 	s := spinner.New()
-	s.Spinner = spinner.Dot
+	s.Spinner = getRandomSpinner()
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
 
 	statusLine := statusLine{
 		spinner:     s,
 		loadingText: "Thinking...",
-		aiModel:     "Insert model name here",
 	}
 
+	borderStyle := lipgloss.NewStyle().BorderStyle(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#b4befe"))
+
 	return model{
-		textarea:   ta,
-		messages:   []string{},
-		viewport:   vp,
-		statusLine: statusLine,
-		err:        nil,
+		textarea:    ta,
+		messages:    []string{},
+		aiModel:     aiModel,
+		viewport:    vp,
+		statusLine:  statusLine,
+		borderStyle: borderStyle,
+		err:         nil,
 	}
 }
 
@@ -120,11 +150,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.viewport.SetWidth(msg.Width)
-		m.textarea.SetWidth(msg.Width)
-		m.viewport.SetHeight(msg.Height - m.textarea.Height() - 1) // The -1 is from the statusbar
+		m.textarea.SetWidth(msg.Width - m.borderStyle.GetHorizontalFrameSize())
+		m.viewport.SetHeight(msg.Height - m.borderStyle.GetVerticalBorderSize() - m.textarea.Height() - 1) // The -1 is from the statusbar
 
 		if len(m.messages) > 0 {
-			m.viewport.SetContent(lipgloss.NewStyle().Width(m.viewport.Width()).Render(strings.Join(m.messages, "\n")))
+			m.refreshViewport()
 		}
 		m.viewport.GotoBottom()
 	case tea.KeyPressMsg:
@@ -139,14 +169,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.textarea.Reset()
 			m.messages = append(m.messages, "You: "+userInput)
 			m.messages = append(m.messages, "Assistant: ")
-			m.viewport.SetContent(lipgloss.NewStyle().Width(m.viewport.Width()).Render(strings.Join(m.messages, "\n")))
+			m.refreshViewport()
 			m.viewport.GotoBottom()
 
 			events := make(chan streamEvent, 16)
 			m.events = events
 
+			m.statusLine.spinner.Spinner = getRandomSpinner()
+
 			return m, tea.Batch(
-				m.runRequest(userInput, events),
+				m.runRequest(userInput, m.aiModel, events),
 				waitForEvent(events),
 			)
 		default:
@@ -187,13 +219,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) View() tea.View {
 	viewportView := m.viewport.View()
+
+	inputView := m.borderStyle.Render(m.textarea.View())
+
 	var statusLine string
 	if m.events != nil {
 		statusLine += m.statusLine.spinner.View() + " " + m.statusLine.loadingText
 	}
-	rightStyle := lipgloss.NewStyle().Width(m.viewport.Width() - lipgloss.Width(statusLine)).Align(lipgloss.Right)
-	statusLine += rightStyle.Render(m.statusLine.aiModel)
-	v := tea.NewView(viewportView + "\n" + m.textarea.View() + "\n" + statusLine)
+	rightStyle := lipgloss.NewStyle().Width(m.viewport.Width() - lipgloss.Width(statusLine)).Align(lipgloss.Right).Foreground(lipgloss.Color("#FA8072")).Italic(true)
+	statusLine += rightStyle.Render(m.aiModel)
+	// statusColor := lipgloss.NewStyle().Background(lipgloss.Color("#313244"))
+	// statusLine = statusColor.Render(statusLine)
+
+	v := tea.NewView(viewportView + "\n" + inputView + "\n" + statusLine)
 	c := m.textarea.Cursor()
 	// Move cursor under the viewport
 	if c != nil {
