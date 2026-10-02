@@ -1,26 +1,72 @@
 package main
 
 import (
+	"strings"
+
 	"charm.land/bubbles/v2/cursor"
+	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"strings"
 )
 
+type streamEvent struct {
+	chunk string
+	err   error
+}
+
+type chunkMsg string
+type requestErrorMsg struct{ err error }
+type requestDoneMsg struct{ err error }
+
+func (m model) runRequest(prompt string, events chan<- streamEvent) tea.Cmd {
+	return func() tea.Msg {
+		defer close(events)
+
+		err := SendRequest(prompt, func(chunk string) error {
+			events <- streamEvent{chunk: chunk}
+			return nil
+		})
+		if err != nil {
+			events <- streamEvent{err: err}
+		}
+		return nil
+	}
+}
+
+func waitForEvent(events <-chan streamEvent) tea.Cmd {
+	return func() tea.Msg {
+		event, ok := <-events
+		if !ok {
+			return requestDoneMsg{}
+		}
+		if event.err != nil {
+			return requestErrorMsg{event.err}
+		}
+		return chunkMsg(event.chunk)
+	}
+}
+
+type statusLine struct {
+	spinner     spinner.Model
+	loadingText string
+	aiModel     string
+}
+
 type model struct {
-	viewport viewport.Model
-	messages []string
-	textarea textarea.Model
-	events   chan streamEvent
-	err      error
+	viewport   viewport.Model
+	messages   []string
+	textarea   textarea.Model
+	events     chan streamEvent
+	statusLine statusLine
+	err        error
 }
 
 func initialModel() model {
 	ta := textarea.New()
 	ta.Placeholder = "Send a message..."
-	ta.SetVirtualCursor(false)
+	ta.SetVirtualCursor(true)
 	ta.Focus()
 
 	ta.Prompt = "| "
@@ -30,9 +76,9 @@ func initialModel() model {
 	ta.SetHeight(3)
 
 	// Remove cursor line styling
-	s := ta.Styles()
-	s.Focused.CursorLine = lipgloss.NewStyle()
-	ta.SetStyles(s)
+	cursorStyle := ta.Styles()
+	cursorStyle.Focused.CursorLine = lipgloss.NewStyle()
+	ta.SetStyles(cursorStyle)
 
 	ta.ShowLineNumbers = false
 
@@ -44,16 +90,30 @@ Type a message and press Enter to send.`)
 
 	ta.KeyMap.InsertNewline.SetEnabled(false)
 
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+
+	statusLine := statusLine{
+		spinner:     s,
+		loadingText: "Thinking...",
+		aiModel:     "Insert model name here",
+	}
+
 	return model{
-		textarea: ta,
-		messages: []string{},
-		viewport: vp,
-		err:      nil,
+		textarea:   ta,
+		messages:   []string{},
+		viewport:   vp,
+		statusLine: statusLine,
+		err:        nil,
 	}
 }
 
 func (m model) Init() tea.Cmd {
-	return textarea.Blink
+	return tea.Batch(
+		textarea.Blink,
+		m.statusLine.spinner.Tick,
+	)
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -61,7 +121,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.viewport.SetWidth(msg.Width)
 		m.textarea.SetWidth(msg.Width)
-		m.viewport.SetHeight(msg.Height - m.textarea.Height())
+		m.viewport.SetHeight(msg.Height - m.textarea.Height() - 1) // The -1 is from the statusbar
 
 		if len(m.messages) > 0 {
 			m.viewport.SetContent(lipgloss.NewStyle().Width(m.viewport.Width()).Render(strings.Join(m.messages, "\n")))
@@ -86,7 +146,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.events = events
 
 			return m, tea.Batch(
-				runRequest(userInput, events),
+				m.runRequest(userInput, events),
 				waitForEvent(events),
 			)
 		default:
@@ -116,13 +176,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.textarea, cmd = m.textarea.Update(msg)
 		return m, cmd
+	default:
+		var cmd tea.Cmd
+		m.statusLine.spinner, cmd = m.statusLine.spinner.Update(msg)
+		return m, cmd
 	}
+
 	return m, nil
 }
 
 func (m model) View() tea.View {
 	viewportView := m.viewport.View()
-	v := tea.NewView(viewportView + "\n" + m.textarea.View())
+	var statusLine string
+	if m.events != nil {
+		statusLine += m.statusLine.spinner.View() + " " + m.statusLine.loadingText
+	}
+	rightStyle := lipgloss.NewStyle().Width(m.viewport.Width() - lipgloss.Width(statusLine)).Align(lipgloss.Right)
+	statusLine += rightStyle.Render(m.statusLine.aiModel)
+	v := tea.NewView(viewportView + "\n" + m.textarea.View() + "\n" + statusLine)
 	c := m.textarea.Cursor()
 	// Move cursor under the viewport
 	if c != nil {

@@ -5,11 +5,11 @@ go 1.27.1
 require (
 	charm.land/bubbles/v2 v2.2.1
 	charm.land/bubbletea/v2 v2.0.10
+	charm.land/lipgloss/v2 v2.0.5
 	github.com/ollama/ollama v0.34.4
 )
 
 require (
-	charm.land/lipgloss/v2 v2.0.5 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.1.1 // indirect

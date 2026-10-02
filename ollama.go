@@ -24,10 +24,10 @@ func (t *basicAuthTransport) RoundTrip(req *http.Request) (*http.Response, error
 
 func buildHttpClient() *http.Client {
 	log.Println("Building request...")
-	username := os.Getenv("USER")
-	password := os.Getenv("PASS")
+	username := os.Getenv("OLLAMAUSER")
+	password := os.Getenv("OLLAMAPASS")
 	if username == "" || password == "" {
-		log.Fatal("set USER and PASS")
+		log.Fatal("set OLLAMAUSER and OLLAMAPASS")
 	}
 
 	httpClient := &http.Client{

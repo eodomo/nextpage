@@ -8,43 +8,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-type streamEvent struct {
-	chunk string
-	err   error
-}
-
-type chunkMsg string
-type requestErrorMsg struct{ err error }
-type requestDoneMsg struct{ err error }
-
-func runRequest(prompt string, events chan<- streamEvent) tea.Cmd {
-	return func() tea.Msg {
-		defer close(events)
-
-		err := SendRequest(prompt, func(chunk string) error {
-			events <- streamEvent{chunk: chunk}
-			return nil
-		})
-		if err != nil {
-			events <- streamEvent{err: err}
-		}
-		return nil
-	}
-}
-
-func waitForEvent(events <-chan streamEvent) tea.Cmd {
-	return func() tea.Msg {
-		event, ok := <-events
-		if !ok {
-			return requestDoneMsg{}
-		}
-		if event.err != nil {
-			return requestErrorMsg{event.err}
-		}
-		return chunkMsg(event.chunk)
-	}
-}
-
 func main() {
 	logPath := os.Getenv("LOGPATH")
 	if logPath == "" {
