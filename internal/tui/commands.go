@@ -70,6 +70,7 @@ func (m *Model) buildCommands() []command {
 		{name: "bashes", desc: "List background shells", run: (*Model).cmdBashes},
 		{name: "think", desc: "Toggle extended thinking", idleOnly: true, run: (*Model).cmdThink},
 		{name: "mouse", desc: "Toggle mouse capture (wheel scrolling vs. native text selection)", run: (*Model).cmdMouse},
+		{name: "courses", desc: "List your courses", run: (*Model).cmdCourses},
 		{name: "export", desc: "Export the conversation to a markdown file [path]", run: (*Model).cmdExport},
 		{name: "exit", aliases: []string{"quit"}, desc: "Exit nextpage", run: func(m *Model, _ string) tea.Cmd { return m.quit() }},
 	}
@@ -523,6 +524,7 @@ func (m *Model) cmdBashes(string) tea.Cmd {
 
 func (m *Model) cmdThink(string) tea.Cmd {
 	m.d.Agent.Think = !m.d.Agent.Think
+	m.d.Agent.ThinkExplicit = true
 	m.notice(kindNotice, fmt.Sprintf("Extended thinking: %v", m.d.Agent.Think))
 	return nil
 }

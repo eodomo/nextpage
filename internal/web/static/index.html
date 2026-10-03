@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>nextpage</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Titillium+Web:wght@400;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<link rel="stylesheet" href="/static/style.css">
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark"></span><span class="brand-word">next<span>page</span></span></div>
+    <span class="status-dot" id="status-dot" title="idle"></span>
+    <div class="spacer"></div>
+    <span class="model-pill" id="model"></span>
+    <button class="btn btn-ghost" id="open-settings">Settings</button>
+    <button class="btn btn-ghost" id="new-chat" title="Start a new conversation (courses are kept)">New chat</button>
+    <form method="post" action="/logout" class="signout"><button class="btn btn-ghost" type="submit">Sign out</button></form>
+    <nav class="tabs" id="tabs">
+      <button data-pane="sidebar">Courses</button>
+      <button data-pane="reader">Lesson</button>
+      <button data-pane="chat" class="on">Tutor</button>
+    </nav>
+  </header>
+
+  <main class="panes">
+    <aside class="pane sidebar" id="pane-sidebar">
+      <div class="pane-head">Courses</div>
+      <div class="pane-body" id="courses"></div>
+    </aside>
+
+    <section class="pane reader" id="pane-reader">
+      <div class="pane-head"><span id="reader-title">Reader</span></div>
+      <div class="pane-body reader-body" id="reader">
+        <div class="reader-empty">
+          <div class="brand-mark"></div>
+          <h2>Learn anything, at full speed.</h2>
+          <p>Tell your tutor what you want to learn. It will quiz you to see where you are, chart a course, and write lessons that appear here and in your Obsidian vault.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="pane chat show" id="pane-chat">
+      <div class="pane-head">
+        <span>Tutor</span>
+        <span class="working" id="working"><span class="rev"><i></i><i></i><i></i><i></i><i></i></span><span id="working-label">Thinking</span></span>
+      </div>
+      <div class="pane-body" id="messages-scroll"><div class="messages" id="messages"></div></div>
+      <form class="composer" id="composer">
+        <textarea id="input" rows="2" placeholder="What do you want to learn?"></textarea>
+        <div class="row">
+          <span class="hint">Enter to send · Shift+Enter for a new line</span>
+          <button class="btn" type="button" id="stop" hidden>Stop</button>
+          <button class="btn btn-primary" type="submit" id="send">Send</button>
+        </div>
+      </form>
+    </section>
+  </main>
+</div>
+
+<div class="overlay" id="quiz-overlay" hidden>
+  <form class="quiz" id="quiz">
+    <div class="quiz-head">
+      <div class="quiz-kicker" id="quiz-kicker"></div>
+      <h2 id="quiz-title"></h2>
+    </div>
+    <div class="quiz-body" id="quiz-body"></div>
+    <div class="quiz-foot">
+      <span class="count" id="quiz-count"></span>
+      <button class="btn btn-primary" type="submit">Submit answers</button>
+    </div>
+  </form>
+</div>
+
+<div class="overlay" id="settings-overlay" hidden>
+  <form class="quiz settings" id="settings">
+    <div class="quiz-head">
+      <div class="quiz-kicker">Settings</div>
+      <h2>Model server</h2>
+    </div>
+    <div class="quiz-body">
+      <label class="field">
+        <span>Ollama server URL</span>
+        <input type="text" id="set-server" placeholder="https://ollama.example.com" autocomplete="off" required>
+      </label>
+      <div class="field-row">
+        <label class="field">
+          <span>Basic auth username <em>(optional)</em></span>
+          <input type="text" id="set-username" autocomplete="off">
+        </label>
+        <label class="field">
+          <span>Basic auth password <em>(optional)</em></span>
+          <input type="password" id="set-password" autocomplete="new-password">
+        </label>
+      </div>
+      <div class="field-row field-row-end">
+        <label class="field">
+          <span>Model</span>
+          <select id="set-model"></select>
+        </label>
+        <button class="btn" type="button" id="set-test">Test connection</button>
+      </div>
+      <p class="settings-msg" id="settings-msg"></p>
+    </div>
+    <div class="quiz-foot">
+      <span class="count">Saved on the server and used immediately.</span>
+      <button class="btn btn-ghost mobile-only" type="submit" form="signout-form">Sign out</button>
+      <button class="btn btn-ghost" type="button" id="settings-cancel">Cancel</button>
+      <button class="btn btn-primary" type="submit">Save</button>
+    </div>
+  </form>
+</div>
+
+<form id="signout-form" method="post" action="/logout" hidden></form>
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>

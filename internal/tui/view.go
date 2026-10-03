@@ -14,7 +14,17 @@ import (
 	"github.com/eodomo/nextpage/internal/tools"
 )
 
-const defaultPlaceholder = "Ask anything · / for commands · ! for shell · # to remember · @ to attach files"
+const (
+	defaultPlaceholder = "Ask anything · / for commands · ! for shell · # to remember · @ to attach files"
+	learnPlaceholder   = "What do you want to learn? · /courses to see your courses · / for commands"
+)
+
+func (m *Model) placeholder() string {
+	if m.d.Courses != nil {
+		return learnPlaceholder
+	}
+	return defaultPlaceholder
+}
 
 type entryKind int
 
@@ -81,6 +91,17 @@ func (m *Model) refresh(force bool) {
 
 func (m *Model) welcome() string {
 	box := lipgloss.NewStyle().BorderStyle(lipgloss.RoundedBorder()).BorderForeground(colorAccent).Padding(0, 1)
+	if m.d.Courses != nil {
+		dir := m.d.Courses.Dir()
+		if dir == "" {
+			dir = "(chosen when you start your first course)"
+		}
+		return box.Render(fmt.Sprintf("%s nextpage · your AI tutor\n\n%s\n%s\n%s",
+			styleSelected.Render("✻"),
+			"Tell me a topic you want to learn. I'll quiz you to see where you are,\nplan a course, write lessons for Obsidian, and check your progress.",
+			styleDim.Render("/courses to resume a course · /help for commands"),
+			styleDim.Render("courses: "+dir)))
+	}
 	return box.Render(fmt.Sprintf("%s nextpage\n\n%s\n%s",
 		styleSelected.Render("✻"),
 		styleDim.Render("/help for help · shift+tab to change permission mode"),

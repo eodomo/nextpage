@@ -63,7 +63,8 @@ func (a *Agent) compact(ctx context.Context, instructions string, trigger string
 	a.ctxToks = 0
 	a.mu.Unlock()
 	a.appendMsg(llm.Message{
-		Role: llm.RoleUser,
+		Role:    llm.RoleUser,
+		Harness: true,
 		Content: "This session is being continued from a previous conversation that was compacted. Summary of the earlier conversation:\n\n" +
 			summary + "\n\nContinue from where things left off without asking the user to repeat anything.",
 	})

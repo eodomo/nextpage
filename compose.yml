@@ -1,15 +1,44 @@
+# nextpage web app behind Traefik.
+#
+#   cp example.env .env   # fill in the values
+#   docker compose up -d --build
+#
+# Lessons are written to COURSES_PATH on the host (point it at a folder in your
+# Obsidian vault). The container runs as PUID:PGID so the notes are owned by you.
 services:
-  ollama:
-    image: ollama/ollama:latest
+  nextpage:
+    build: .
+    image: nextpage:latest
+    container_name: nextpage
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
+    user: "${PUID:-1000}:${PGID:-1000}"
     environment:
-      OLLAMA_NUM_PARALLEL: "1"
-      OLLAMA_MAX_LOADED_MODELS: "1"
+      # Optional: the model server can also be set (and changed) in the web
+      # app's Settings, which take precedence over these.
+      OLLAMASERVER: ${OLLAMASERVER:-}
+      MODEL: ${MODEL:-}
+      OLLAMAUSER: ${OLLAMAUSER:-}
+      OLLAMAPASS: ${OLLAMAPASS:-}
+      NEXTPAGE_PASSWORD: ${NEXTPAGE_PASSWORD:?set NEXTPAGE_PASSWORD in .env}
+      LOGPATH: /data/nextpage.log
+    volumes:
+      - nextpage_data:/data
+      - ${COURSES_PATH:?set COURSES_PATH in .env}:/courses
+    networks:
+      - traefik
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=${TRAEFIK_NETWORK:-traefik}
+      - traefik.http.routers.nextpage.rule=Host(`${WEB_URL:?set WEB_URL in .env}`)
+      - traefik.http.routers.nextpage.entrypoints=${TRAEFIK_ENTRYPOINT:-websecure}
+      - traefik.http.routers.nextpage.tls=true
+      - traefik.http.routers.nextpage.tls.certresolver=myresolver
+      - traefik.http.services.nextpage.loadbalancer.server.port=8080
 
 volumes:
-  ollama_data:
+  nextpage_data:
 
+networks:
+  traefik:
+    name: ${TRAEFIK_NETWORK:-traefik}
+    external: true

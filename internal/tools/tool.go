@@ -49,6 +49,10 @@ type Result struct {
 	IsError bool
 	// Display, when set, replaces Output in the UI (e.g. a diff for edits).
 	Display string
+	// EndTurn stops the agent loop after this call and hands control back
+	// to the user; Display is shown to them as a note. For steps that must
+	// wait for the user, so the model doesn't keep retrying.
+	EndTurn bool
 }
 
 func Errorf(format string, args ...any) Result {
@@ -130,6 +134,18 @@ func DefaultRegistry() *Registry {
 	)
 }
 
+// Capture lets a tool take long content (a lesson, a quiz) as the model's
+// next plain-text reply, which small models write far more reliably than a
+// long JSON tool argument. If Handle returns an error result the capture
+// stays armed so the model can try again.
+type Capture struct {
+	Name string
+	// Hidden keeps the reply from being streamed to the user (e.g. a quiz,
+	// whose text contains the answers).
+	Hidden bool
+	Handle func(ctx context.Context, text string) Result
+}
+
 type Todo struct {
 	Content    string `json:"content"`
 	Status     string `json:"status"` // pending | in_progress | completed
@@ -161,6 +177,14 @@ type Env struct {
 	ExitPlan func(ctx context.Context, plan string) (bool, error)
 	// OnTodos is notified whenever the todo list changes.
 	OnTodos func([]Todo)
+	// Interact sends an arbitrary request to the front end and waits for its
+	// reply. Plugins define their own payload types (e.g. a quiz) and front
+	// ends type-switch on them; this is how new kinds of user interaction are
+	// added without changing the agent.
+	Interact func(ctx context.Context, payload any) (any, error)
+	// CaptureReply asks the agent to hand the model's next plain-text reply
+	// to a tool instead of treating it as a message to the user. See Capture.
+	CaptureReply func(c Capture)
 }
 
 func NewEnv(cwd, projectRoot string) *Env {

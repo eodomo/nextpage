@@ -31,6 +31,10 @@ type Message struct {
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 	ToolName   string     `json:"tool_name,omitempty"`
+	// Harness marks messages that are not conversation the user should see:
+	// injected nudges and markers, and assistant replies captured as tool
+	// content. They are sent to the model but hidden from transcripts.
+	Harness bool `json:"harness,omitempty"`
 }
 
 // ToolSpec describes a tool to the model. Schema is a JSON Schema object.
@@ -44,8 +48,10 @@ type Request struct {
 	Model    string
 	Messages []Message
 	Tools    []ToolSpec
-	Think    bool
-	Options  map[string]any
+	// Think enables or disables reasoning on models that support it; nil
+	// leaves the model's default (many local models think by default).
+	Think   *bool
+	Options map[string]any
 }
 
 type Usage struct {
@@ -89,7 +95,11 @@ type ProviderConfig struct {
 func New(cfg ProviderConfig) (Provider, error) {
 	switch cfg.Kind {
 	case "", "ollama":
-		return NewOllama(cfg)
+		o, err := NewOllama(cfg)
+		if err != nil {
+			return nil, err // avoid returning a typed nil inside the interface
+		}
+		return o, nil
 	default:
 		return nil, fmt.Errorf("unknown provider %q", cfg.Kind)
 	}

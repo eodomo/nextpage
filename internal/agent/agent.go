@@ -31,13 +31,27 @@ type Config struct {
 	// SystemPrompt is rebuilt every turn so it can reflect the current mode.
 	SystemPrompt func() string
 
-	Think       bool
-	NumCtx      int
-	Temperature *float64
-	MaxTurns    int
+	Think bool
+	// ThinkExplicit sends Think even when false, turning thinking off for
+	// models that think by default. Otherwise false means "model default".
+	ThinkExplicit bool
+	NumCtx        int
+	Temperature   *float64
+	MaxTurns      int
+	// MaxTokens caps each reply (thinking included) so a model stuck in a
+	// repetition loop can't run for hours on a slow server.
+	MaxTokens   int
 	AutoCompact bool
 	// LocalSettings is where "always allow" rules are saved.
 	LocalSettings string
+	// StopCheck runs when the model ends its turn without calling a tool.
+	// A non-empty result is sent back as a reminder and the loop continues
+	// (at most four times per prompt). Plugins use it to keep the model moving
+	// through steps that don't need the user.
+	StopCheck func() string
+	// OnPrompt is told about each prompt the user sends (plugins use it to
+	// know the user has been back, e.g. after reading a lesson).
+	OnPrompt func(prompt string)
 }
 
 type Agent struct {
@@ -45,6 +59,8 @@ type Agent struct {
 	name string // "" for the main agent
 
 	mu       sync.Mutex
+	capture  *capture
+	captures int
 	history  []llm.Message
 	usage    llm.Usage
 	ctxToks  int
@@ -68,6 +84,8 @@ func New(cfg Config) *Agent {
 		cfg.Env.Ask = a.ask
 		cfg.Env.ExitPlan = a.exitPlan
 		cfg.Env.OnTodos = func(t []tools.Todo) { a.emit(TodosUpdate{Todos: t}) }
+		cfg.Env.Interact = a.interact
+		cfg.Env.CaptureReply = a.captureReply
 	}
 	return a
 }
@@ -112,6 +130,20 @@ func (a *Agent) SetModel(m string) {
 	a.Model = m
 }
 
+// SetProvider swaps the model backend (e.g. after the user changes the server
+// in the web app's settings).
+func (a *Agent) SetProvider(p llm.Provider) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.Provider = p
+}
+
+func (a *Agent) CurrentProvider() llm.Provider {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.Provider
+}
+
 // CurrentModel returns the model in use; safe to call from any goroutine.
 func (a *Agent) CurrentModel() string {
 	a.mu.Lock()
@@ -126,6 +158,10 @@ func (a *Agent) appendMsg(m llm.Message) {
 	if err := a.Session.Append(m); err != nil {
 		log.Printf("session: %v", err)
 	}
+}
+
+func (a *Agent) appendHarness(content string) {
+	a.appendMsg(llm.Message{Role: llm.RoleUser, Content: content, Harness: true})
 }
 
 // AddContext appends a user-role message without running the model, e.g.
@@ -159,23 +195,79 @@ func (a *Agent) Run(ctx context.Context, prompt string, emit func(Event)) error 
 	if out.Context != "" {
 		prompt += "\n\n<system-reminder>\n" + out.Context + "\n</system-reminder>"
 	}
+	if a.OnPrompt != nil && a.name == "" {
+		a.OnPrompt(prompt)
+	}
 	a.appendMsg(llm.Message{Role: llm.RoleUser, Content: prompt})
+	// A capture left over from an interrupted run must not swallow the reply
+	// to a new prompt.
+	a.mu.Lock()
+	a.capture = nil
+	a.mu.Unlock()
 	return a.loop(ctx)
 }
 
+// emptyNudge is sent when the model replies with nothing at all. With small
+// local models this usually means a tool call it generated couldn't be
+// parsed and was dropped, so it is told to retry.
+const emptyNudge = "[Your last reply was empty. If you tried to call a tool, the call could not be parsed: try again, keeping the arguments short and simple. Otherwise, reply to the user.]"
+
+// narrationNudge is sent when the model names one of its tools in a reply
+// without calling it, a common failure of small models.
+const narrationNudge = "[You described calling %s but did not call it. Call the tool now instead of describing it.]"
+
+const lengthNudge = "[Your last reply ran out of tokens before finishing, so it was lost. Try again with less thinking and shorter tool arguments.]"
+
 func (a *Agent) loop(ctx context.Context) error {
+	nudges, stopNudges := 0, 0
+	lastFailure, repeats := "", 0
 	for turn := 0; turn < a.MaxTurns; turn++ {
 		resp, err := a.complete(ctx, a.Tools.Specs(), true)
 		if err != nil {
 			if ctx.Err() != nil {
-				a.appendMsg(llm.Message{Role: llm.RoleUser, Content: "[Request interrupted by user]"})
+				a.appendHarness("[Request interrupted by user]")
 			}
 			return err
 		}
 		msg := resp.Message
+		if len(msg.ToolCalls) == 0 && strings.TrimSpace(msg.Content) != "" && a.captureArmed() {
+			// The reply is content for a tool (e.g. a lesson file), not a
+			// chat message; keep it out of reloaded transcripts.
+			msg.Harness = true
+		}
 		a.appendMsg(msg)
 		a.emit(AssistantMessage{Agent: a.name, Message: msg})
 
+		if len(msg.ToolCalls) == 0 && a.takeCapture(ctx, msg.Content) {
+			continue
+		}
+		if resp.DoneReason == "length" {
+			a.emit(Notice{Level: NoticeWarn, Text: fmt.Sprintf("The reply hit the %d-token output limit (maxTokens) and was cut off.", a.MaxTokens)})
+		}
+		if len(msg.ToolCalls) == 0 && strings.TrimSpace(msg.Content) == "" && nudges < 2 {
+			nudges++
+			a.emit(Notice{Level: NoticeWarn, Text: "The model returned an empty reply; asking it to try again."})
+			nudge := emptyNudge
+			if resp.DoneReason == "length" {
+				nudge = lengthNudge
+			}
+			a.appendHarness(nudge)
+			continue
+		}
+		if len(msg.ToolCalls) == 0 && nudges < 2 {
+			if name := a.mentionedTool(msg.Content); name != "" {
+				nudges++
+				a.appendHarness(fmt.Sprintf(narrationNudge, name))
+				continue
+			}
+		}
+		if len(msg.ToolCalls) == 0 && a.StopCheck != nil && stopNudges < 4 {
+			if reminder := a.StopCheck(); reminder != "" {
+				stopNudges++
+				a.appendHarness("[" + reminder + "]")
+				continue
+			}
+		}
 		if len(msg.ToolCalls) == 0 {
 			event := hooks.Stop
 			if a.name != "" {
@@ -184,7 +276,7 @@ func (a *Agent) loop(ctx context.Context) error {
 			out := a.Hooks.Run(ctx, a.hookInput(event))
 			a.reportHookErrors(out)
 			if out.Block && out.Reason != "" {
-				a.appendMsg(llm.Message{Role: llm.RoleUser, Content: "Stop hook feedback:\n" + out.Reason})
+				a.appendHarness("Stop hook feedback:\n" + out.Reason)
 				continue
 			}
 			return a.maybeAutoCompact(ctx)
@@ -195,11 +287,35 @@ func (a *Agent) loop(ctx context.Context) error {
 				for _, c := range msg.ToolCalls[i:] {
 					a.appendToolResult(c, tools.Result{Output: "Tool call cancelled: interrupted by user", IsError: true})
 				}
-				a.appendMsg(llm.Message{Role: llm.RoleUser, Content: "[Request interrupted by user]"})
+				a.appendHarness("[Request interrupted by user]")
 				return ctx.Err()
 			}
 			res, err := a.execTool(ctx, call)
 			a.appendToolResult(call, res)
+			if res.EndTurn {
+				for _, c := range msg.ToolCalls[i+1:] {
+					a.appendToolResult(c, tools.Result{Output: "Tool call skipped: waiting for the user", IsError: true})
+				}
+				if res.Display != "" {
+					a.emit(Notice{Text: res.Display})
+				}
+				return nil
+			}
+			// Stop a model that keeps making the same failing call.
+			if res.IsError {
+				key := call.Name + string(call.Args) + res.Output
+				if key == lastFailure {
+					repeats++
+				} else {
+					lastFailure, repeats = key, 1
+				}
+				if repeats >= 3 {
+					a.emit(Notice{Level: NoticeError, Text: fmt.Sprintf("Stopped: the model repeated the same failing %s call 3 times. Last error: %s", call.Name, res.Output)})
+					return nil
+				}
+			} else {
+				lastFailure, repeats = "", 0
+			}
 			if errors.Is(err, errStopTurn) {
 				for _, c := range msg.ToolCalls[i+1:] {
 					a.appendToolResult(c, tools.Result{Output: "Tool call skipped: the user rejected an earlier call", IsError: true})
@@ -215,6 +331,36 @@ func (a *Agent) loop(ctx context.Context) error {
 	return nil
 }
 
+func (a *Agent) thinkOption() *bool {
+	if !a.Think && !a.ThinkExplicit {
+		return nil
+	}
+	v := a.Think
+	return &v
+}
+
+// mentionedTool returns the name of a tool the text refers to as if calling
+// it, or "". Only distinctive (CamelCase, multi-word) names count, so
+// ordinary words like "Read" or "Bash" in prose don't trigger it.
+func (a *Agent) mentionedTool(text string) string {
+	for _, t := range a.Tools.All() {
+		name := t.Name()
+		if len(name) < 8 || strings.HasPrefix(name, "mcp__") || strings.ToLower(name) == name {
+			continue
+		}
+		upper := 0
+		for _, r := range name {
+			if r >= 'A' && r <= 'Z' {
+				upper++
+			}
+		}
+		if upper >= 2 && strings.Contains(text, name) {
+			return name
+		}
+	}
+	return ""
+}
+
 func (a *Agent) options() map[string]any {
 	opts := map[string]any{}
 	if a.NumCtx > 0 {
@@ -223,21 +369,31 @@ func (a *Agent) options() map[string]any {
 	if a.Temperature != nil {
 		opts["temperature"] = *a.Temperature
 	}
+	if a.MaxTokens > 0 {
+		opts["num_predict"] = a.MaxTokens
+	}
 	return opts
 }
 
 func (a *Agent) complete(ctx context.Context, specs []llm.ToolSpec, stream bool) (llm.Response, error) {
 	msgs := []llm.Message{{Role: llm.RoleSystem, Content: a.SystemPrompt()}}
 	msgs = append(msgs, a.History()...)
-	resp, err := a.Provider.Chat(ctx, llm.Request{
+	provider := a.CurrentProvider()
+	if provider == nil {
+		return llm.Response{}, errors.New("no model server is configured")
+	}
+	resp, err := provider.Chat(ctx, llm.Request{
 		Model:    a.CurrentModel(),
 		Messages: msgs,
 		Tools:    specs,
-		Think:    a.Think,
+		Think:    a.thinkOption(),
 		Options:  a.options(),
 	}, func(d llm.Delta) {
 		if !stream {
 			return
+		}
+		if d.Content != "" && a.captureHidden() {
+			return // e.g. quiz text with answers: never shown while streaming
 		}
 		if d.Thinking != "" {
 			a.emit(ThinkingDelta{Agent: a.name, Text: d.Thinking})
@@ -383,6 +539,63 @@ func preview(t tools.Tool, input json.RawMessage) string {
 func (a *Agent) reportHookErrors(o hooks.Outcome) {
 	for _, e := range o.Errors {
 		a.emit(Notice{Level: NoticeWarn, Text: e})
+	}
+}
+
+type capture struct {
+	tools.Capture
+	id string
+}
+
+func (a *Agent) captureReply(tc tools.Capture) {
+	a.mu.Lock()
+	a.captures++
+	c := &capture{Capture: tc, id: fmt.Sprintf("capture_%d", a.captures)}
+	a.capture = c
+	a.mu.Unlock()
+	a.emit(ToolStart{Agent: a.name, ID: c.id, Name: tc.Name, Subject: "writing…"})
+}
+
+func (a *Agent) captureHidden() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.capture != nil && a.capture.Hidden
+}
+
+func (a *Agent) captureArmed() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.capture != nil
+}
+
+// takeCapture runs a pending capture on text. It reports whether a capture
+// consumed the reply.
+func (a *Agent) takeCapture(ctx context.Context, text string) bool {
+	a.mu.Lock()
+	c := a.capture
+	a.mu.Unlock()
+	if c == nil || strings.TrimSpace(text) == "" {
+		return false
+	}
+	res := c.Handle(ctx, text)
+	if !res.IsError {
+		a.mu.Lock()
+		a.capture = nil
+		a.mu.Unlock()
+	}
+	a.emit(ToolEnd{Agent: a.name, ID: c.id, Name: c.Name, Result: res})
+	a.appendHarness("[" + c.Name + ": " + res.Output + "]")
+	return true
+}
+
+func (a *Agent) interact(ctx context.Context, payload any) (any, error) {
+	req := InteractionRequest{Agent: a.name, Payload: payload, Reply: make(chan any, 1)}
+	a.emit(req)
+	select {
+	case v := <-req.Reply:
+		return v, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
 }
 

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>nextpage · sign in</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Titillium+Web:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="login-body">
+  <form class="login-card" method="post" action="/login">
+    <div class="brand brand-lg"><span class="brand-mark"></span><span class="brand-word">next<span>page</span></span></div>
+    <p class="login-sub">Your AI tutor</p>
+    <!--error-->
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" autocomplete="current-password" autofocus required>
+    <button class="btn btn-primary" type="submit">Enter</button>
+  </form>
+</body>
+</html>

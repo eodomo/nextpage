@@ -25,7 +25,7 @@ type dialog struct {
 
 func (m *Model) closeDialog() {
 	m.dialog = nil
-	m.input.Placeholder = defaultPlaceholder
+	m.input.Placeholder = m.placeholder()
 	m.input.Reset()
 }
 
@@ -35,7 +35,7 @@ func (m *Model) dialogKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	if d.textMode {
 		if key == "esc" {
 			d.textMode = false
-			m.input.Placeholder = defaultPlaceholder
+			m.input.Placeholder = m.placeholder()
 			m.input.Reset()
 			return nil, true
 		}

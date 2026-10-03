@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -51,7 +52,7 @@ func (o *Ollama) Name() string { return "ollama" }
 func (o *Ollama) ListModels(ctx context.Context) ([]string, error) {
 	resp, err := o.client.List(ctx)
 	if err != nil {
-		return nil, err
+		return nil, explain(err)
 	}
 	names := make([]string, 0, len(resp.Models))
 	for _, m := range resp.Models {
@@ -74,8 +75,8 @@ func (o *Ollama) Chat(ctx context.Context, req Request, onDelta func(Delta)) (Re
 		Tools:    tools,
 		Options:  req.Options,
 	}
-	if req.Think {
-		areq.Think = &api.ThinkValue{Value: true}
+	if req.Think != nil {
+		areq.Think = &api.ThinkValue{Value: *req.Think}
 	}
 
 	var out Response
@@ -110,7 +111,31 @@ func (o *Ollama) Chat(ctx context.Context, req Request, onDelta func(Delta)) (Re
 		}
 		return nil
 	})
-	return out, err
+	return out, explain(err)
+}
+
+// explain turns HTTP auth failures, which Ollama's client reports vaguely,
+// into an actionable message.
+func explain(err error) error {
+	code := 0
+	var se api.StatusError
+	var sp *api.StatusError
+	var ae api.AuthorizationError
+	var ap *api.AuthorizationError
+	switch {
+	case errors.As(err, &se):
+		code = se.StatusCode
+	case errors.As(err, &sp):
+		code = sp.StatusCode
+	case errors.As(err, &ae):
+		code = ae.StatusCode
+	case errors.As(err, &ap):
+		code = ap.StatusCode
+	}
+	if code == http.StatusUnauthorized || code == http.StatusForbidden {
+		return fmt.Errorf("the server rejected the login (HTTP %d); check the basic auth username and password", code)
+	}
+	return err
 }
 
 func toOllamaMessages(msgs []Message) []api.Message {

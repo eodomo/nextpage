@@ -54,10 +54,17 @@ type Settings struct {
 	Think       *bool                    `json:"think,omitempty"`
 	AutoCompact *bool                    `json:"autoCompact,omitempty"`
 	MaxTurns    int                      `json:"maxTurns,omitempty"`
+	MaxTokens   int                      `json:"maxTokens,omitempty"` // output cap per model reply
 	Permissions Permissions              `json:"permissions"`
 	Hooks       map[string][]HookMatcher `json:"hooks,omitempty"`
 	Env         map[string]string        `json:"env,omitempty"`
 	MCPServers  map[string]MCPServer     `json:"mcpServers,omitempty"`
+
+	// Learning platform (profile "learn").
+	Profile      string `json:"profile,omitempty"`      // "learn" (default) or "code"
+	CoursesDir   string `json:"coursesDir,omitempty"`   // where course notes are written
+	LessonFormat string `json:"lessonFormat,omitempty"` // "markdown" (default) or "latex"
+	PassPercent  int    `json:"passPercent,omitempty"`  // checkpoint pass mark
 }
 
 // Paths records where each settings layer lives for this project.
@@ -174,6 +181,21 @@ func (s *Settings) merge(o Settings) {
 	if o.MaxTurns != 0 {
 		s.MaxTurns = o.MaxTurns
 	}
+	if o.MaxTokens != 0 {
+		s.MaxTokens = o.MaxTokens
+	}
+	if o.Profile != "" {
+		s.Profile = o.Profile
+	}
+	if o.CoursesDir != "" {
+		s.CoursesDir = o.CoursesDir
+	}
+	if o.LessonFormat != "" {
+		s.LessonFormat = o.LessonFormat
+	}
+	if o.PassPercent != 0 {
+		s.PassPercent = o.PassPercent
+	}
 	s.Permissions.Allow = append(s.Permissions.Allow, o.Permissions.Allow...)
 	s.Permissions.Deny = append(s.Permissions.Deny, o.Permissions.Deny...)
 	s.Permissions.Ask = append(s.Permissions.Ask, o.Permissions.Ask...)
@@ -200,10 +222,33 @@ func (s *Settings) merge(o Settings) {
 	}
 }
 
+// SetValue sets a top-level key in a settings file, creating it if needed
+// and preserving everything else in it.
+func SetValue(path, key string, value any) error {
+	return modify(path, func(raw map[string]any) { raw[key] = value })
+}
+
 // AddAllowRule appends a permission rule to the given settings file
 // (normally settings.local.json), creating it if needed. Unknown fields in
 // the file are preserved.
 func AddAllowRule(path, rule string) error {
+	return modify(path, func(raw map[string]any) {
+		perms, _ := raw["permissions"].(map[string]any)
+		if perms == nil {
+			perms = map[string]any{}
+		}
+		allow, _ := perms["allow"].([]any)
+		for _, r := range allow {
+			if r == rule {
+				return
+			}
+		}
+		perms["allow"] = append(allow, rule)
+		raw["permissions"] = perms
+	})
+}
+
+func modify(path string, fn func(raw map[string]any)) error {
 	raw := map[string]any{}
 	if data, err := os.ReadFile(path); err == nil {
 		if err := json.Unmarshal(data, &raw); err != nil {
@@ -212,18 +257,7 @@ func AddAllowRule(path, rule string) error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	perms, _ := raw["permissions"].(map[string]any)
-	if perms == nil {
-		perms = map[string]any{}
-	}
-	allow, _ := perms["allow"].([]any)
-	for _, r := range allow {
-		if r == rule {
-			return nil
-		}
-	}
-	perms["allow"] = append(allow, rule)
-	raw["permissions"] = perms
+	fn(raw)
 	data, err := json.MarshalIndent(raw, "", "  ")
 	if err != nil {
 		return err
@@ -232,4 +266,42 @@ func AddAllowRule(path, rule string) error {
 		return err
 	}
 	return os.WriteFile(path, append(data, '\n'), 0o644)
+}
+
+// Connection is the model server login saved from the web app's settings.
+// It overrides OLLAMASERVER/MODEL/OLLAMAUSER/OLLAMAPASS when present.
+type Connection struct {
+	Server   string `json:"server"`
+	Username string `json:"username,omitempty"`
+	Password string `json:"password,omitempty"`
+	Model    string `json:"model,omitempty"`
+}
+
+func ConnectionPath(userDir string) string {
+	return filepath.Join(userDir, "connection.json")
+}
+
+func LoadConnection(path string) (Connection, error) {
+	var c Connection
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return c, nil
+	}
+	if err != nil {
+		return c, err
+	}
+	return c, json.Unmarshal(data, &c)
+}
+
+// SaveConnection writes the file readable only by its owner, since it holds
+// a password.
+func SaveConnection(path string, c Connection) error {
+	data, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(data, '\n'), 0o600)
 }

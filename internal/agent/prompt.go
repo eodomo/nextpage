@@ -21,6 +21,12 @@ type PromptContext struct {
 	Skills      []ext.Skill
 	Agents      []ext.AgentDef
 	GitStatus   string
+	// Base replaces the default coding-agent instructions (used by profiles
+	// such as the learning platform).
+	Base string
+	// Sections are rendered every turn and appended, letting plugins inject
+	// live state (e.g. the current course and the next required step).
+	Sections []func() string
 	// Extra is appended verbatim (from --append-system-prompt).
 	Extra string
 }
@@ -49,7 +55,11 @@ const basePrompt = `You are nextpage, an interactive coding agent running in the
 
 func BuildSystemPrompt(pc PromptContext) string {
 	var b strings.Builder
-	b.WriteString(basePrompt)
+	if pc.Base != "" {
+		b.WriteString(pc.Base)
+	} else {
+		b.WriteString(basePrompt)
+	}
 
 	if pc.Mode != nil && pc.Mode() == permission.ModePlan {
 		b.WriteString(`
@@ -88,6 +98,11 @@ The user wants a plan before any changes. You MUST NOT edit files, run commands 
 		if mem := pc.Memory(); mem != "" {
 			b.WriteString("\n\n# Project and user instructions\nThe following instructions OVERRIDE default behavior and must be followed exactly.\n\n")
 			b.WriteString(mem)
+		}
+	}
+	for _, section := range pc.Sections {
+		if s := section(); s != "" {
+			b.WriteString("\n\n" + s)
 		}
 	}
 	if pc.Extra != "" {

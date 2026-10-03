@@ -23,6 +23,7 @@ import (
 	"github.com/eodomo/nextpage/internal/config"
 	"github.com/eodomo/nextpage/internal/ext"
 	"github.com/eodomo/nextpage/internal/hooks"
+	"github.com/eodomo/nextpage/internal/learn"
 	"github.com/eodomo/nextpage/internal/llm"
 	"github.com/eodomo/nextpage/internal/mcp"
 	"github.com/eodomo/nextpage/internal/memory"
@@ -49,6 +50,8 @@ type Deps struct {
 	ReloadMemory func()
 	// InitialPrompt is submitted as soon as the UI starts.
 	InitialPrompt string
+	// Courses is set in the learn profile.
+	Courses *learn.Manager
 }
 
 type agentEventMsg struct{ ev agent.Event }
@@ -142,6 +145,9 @@ func New(d Deps) *Model {
 		height:    24,
 	}
 	m.commands = m.buildCommands()
+	if d.Courses != nil {
+		m.input.Placeholder = learnPlaceholder
+	}
 	m.replayHistory(d.Agent.History())
 	return m
 }
@@ -436,7 +442,7 @@ func (m *Model) finishRun(err error) tea.Cmd {
 	m.events = nil
 	m.cancel = nil
 	m.dialog = nil
-	m.input.Placeholder = defaultPlaceholder
+	m.input.Placeholder = m.placeholder()
 	for _, e := range m.entries {
 		e.streaming = false
 		if e.kind == kindTool && e.result == nil {
@@ -610,6 +616,8 @@ func (m *Model) handleEvent(ev agent.Event) tea.Cmd {
 		m.openQuestionDialog(e)
 	case agent.PlanRequest:
 		m.openPlanDialog(e)
+	case agent.InteractionRequest:
+		m.handleInteraction(e)
 	case agent.Notice:
 		kind := kindNotice
 		if e.Level == agent.NoticeError {
@@ -665,13 +673,16 @@ func (m *Model) replayHistory(h []llm.Message) {
 	for _, msg := range h {
 		switch msg.Role {
 		case llm.RoleUser:
+			if msg.Harness {
+				continue
+			}
 			text := msg.Content
 			if i := strings.Index(text, "\n\n<system-reminder>"); i >= 0 {
 				text = text[:i]
 			}
 			m.entries = append(m.entries, &entry{kind: kindUser, text: text, dirty: true})
 		case llm.RoleAssistant:
-			if strings.TrimSpace(msg.Content) != "" {
+			if strings.TrimSpace(msg.Content) != "" && !msg.Harness {
 				m.entries = append(m.entries, &entry{kind: kindAssistant, text: msg.Content, dirty: true})
 			}
 			for _, tc := range msg.ToolCalls {

@@ -32,6 +32,9 @@ func runPrint(ag *agent.Agent, prompt string, opts options) error {
 			e.Reply <- "(no user is available in non-interactive mode; make a reasonable assumption and state it)"
 		case agent.PlanRequest:
 			e.Reply <- false
+		case agent.InteractionRequest:
+			// Quizzes and other plugin interactions need a front end.
+			e.Reply <- nil
 		case agent.Notice:
 			fmt.Fprintln(os.Stderr, e.Text)
 		case agent.ToolStart:
@@ -79,7 +82,7 @@ func runPrint(ag *agent.Agent, prompt string, opts options) error {
 
 func lastAssistantText(h []llm.Message) string {
 	for i := len(h) - 1; i >= 0; i-- {
-		if h[i].Role == llm.RoleAssistant && strings.TrimSpace(h[i].Content) != "" {
+		if h[i].Role == llm.RoleAssistant && !h[i].Harness && strings.TrimSpace(h[i].Content) != "" {
 			return strings.TrimSpace(h[i].Content)
 		}
 	}

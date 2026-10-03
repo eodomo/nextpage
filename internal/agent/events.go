@@ -74,6 +74,14 @@ type QuestionRequest struct {
 	Reply    chan string
 }
 
+// InteractionRequest carries a plugin-defined payload (see tools.Env.Interact)
+// to the front end, which must send exactly one value on Reply.
+type InteractionRequest struct {
+	Agent   string
+	Payload any
+	Reply   chan any
+}
+
 type PlanRequest struct {
 	Plan  string
 	Reply chan bool
@@ -103,14 +111,15 @@ type TodosUpdate struct {
 	Todos []tools.Todo
 }
 
-func (TextDelta) isEvent()         {}
-func (ThinkingDelta) isEvent()     {}
-func (AssistantMessage) isEvent()  {}
-func (ToolStart) isEvent()         {}
-func (ToolEnd) isEvent()           {}
-func (PermissionRequest) isEvent() {}
-func (QuestionRequest) isEvent()   {}
-func (PlanRequest) isEvent()       {}
-func (Notice) isEvent()            {}
-func (UsageUpdate) isEvent()       {}
-func (TodosUpdate) isEvent()       {}
+func (TextDelta) isEvent()          {}
+func (ThinkingDelta) isEvent()      {}
+func (AssistantMessage) isEvent()   {}
+func (ToolStart) isEvent()          {}
+func (ToolEnd) isEvent()            {}
+func (PermissionRequest) isEvent()  {}
+func (QuestionRequest) isEvent()    {}
+func (PlanRequest) isEvent()        {}
+func (InteractionRequest) isEvent() {}
+func (Notice) isEvent()             {}
+func (UsageUpdate) isEvent()        {}
+func (TodosUpdate) isEvent()        {}
