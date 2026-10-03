@@ -2,3 +2,5 @@ CLAUDE.md
 .env
 .log
 out/
+.nextpage/settings.local.json
+NEXTPAGE.local.md

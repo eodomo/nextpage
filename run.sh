@@ -1,1 +1,1 @@
-(export $(grep -v '^#' .env | xargs) && go run .)
+(export $(grep -v '^#' .env | xargs) && go run . "$@")
