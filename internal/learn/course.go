@@ -117,6 +117,16 @@ type Manager struct {
 	// next sends a message: checkpoints wait until they have had a chance to
 	// read it.
 	reading bool
+	// lastLesson is the most recently written lesson, relative to Dir, so
+	// front ends can open it.
+	lastLesson string
+}
+
+// LastLesson returns the path (relative to Dir) of the newest lesson.
+func (m *Manager) LastLesson() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.lastLesson
 }
 
 // UserSpoke is wired to agent.Config.OnPrompt.

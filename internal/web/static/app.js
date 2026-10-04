@@ -345,8 +345,16 @@ function toolStart(ev) {
 
 function toolEnd(ev, replay) {
   let t = state.tools.get(ev.id);
+  if (ev.is_error) {
+    // A failed call is the tutor retrying internally; details are in the
+    // server log, not the chat.
+    t?.remove();
+    state.tools.delete(ev.id);
+    setWorking('Thinking');
+    return;
+  }
   if (!t) { toolStart(ev); t = state.tools.get(ev.id); }
-  t.classList.add(ev.is_error ? 'err' : 'ok');
+  t.classList.add('ok');
   const body = t.lastChild;
   if (ev.output) body.append(el('span', 'out', ev.output));
   // A lesson written as a captured reply streamed into the chat; it now lives

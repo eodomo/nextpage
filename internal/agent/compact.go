@@ -79,9 +79,9 @@ func (a *Agent) maybeAutoCompact(ctx context.Context) error {
 	if used < a.NumCtx*85/100 {
 		return nil
 	}
-	a.emit(Notice{Text: fmt.Sprintf("Context %d/%d tokens; compacting conversation...", used, a.NumCtx)})
+	a.debug("context %d/%d tokens; compacting conversation", used, a.NumCtx)
 	if err := a.compact(ctx, "", "auto"); err != nil {
-		a.emit(Notice{Level: NoticeWarn, Text: "auto-compact failed: " + err.Error()})
+		a.debug("auto-compact failed: %v", err)
 	}
 	return nil
 }

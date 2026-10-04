@@ -84,7 +84,7 @@ func (t *startCourse) Run(ctx context.Context, env *tools.Env, in json.RawMessag
 	dir := t.m.folder(c)
 	return tools.Result{
 		Output:  fmt.Sprintf("Course %q created in %s. Now give the placement quiz with GiveQuiz (kind \"placement\").", c.Title, dir),
-		Display: "Created " + dir,
+		Display: fmt.Sprintf("Started “%s”", c.Title),
 	}
 }
 
@@ -146,7 +146,7 @@ func (*courseStatus) Schema() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{}}`)
 }
 func (t *courseStatus) Run(ctx context.Context, env *tools.Env, in json.RawMessage) tools.Result {
-	return tools.Result{Output: t.m.StatePrompt()}
+	return tools.Result{Output: t.m.StatePrompt(), Display: "Checked your progress"}
 }
 
 // ---- GiveQuiz ----
@@ -504,7 +504,7 @@ func (t *gradeQuiz) Run(ctx context.Context, env *tools.Env, in json.RawMessage)
 		return fail(err)
 	}
 	if result == nil {
-		return tools.Result{Output: msg, Display: "Already graded"}
+		return tools.Result{Output: msg, Display: "Quiz already graded"}
 	}
 	return tools.Result{Output: msg, Display: quizDisplay(result)}
 }
@@ -676,7 +676,7 @@ func (t *saveCoursePlan) Run(ctx context.Context, env *tools.Env, in json.RawMes
 	if err != nil {
 		return fail(err)
 	}
-	return tools.Result{Output: msg, Display: fmt.Sprintf("Saved plan with %d sections", len(newSecs))}
+	return tools.Result{Output: msg, Display: fmt.Sprintf("Course plan ready: %d sections", len(newSecs))}
 }
 
 // ---- WriteLesson ----
@@ -780,6 +780,7 @@ func (t *writeLesson) save(sectionID, title, content string) tools.Result {
 		if path, err = t.m.writeNote(c, name, body); err != nil {
 			return err
 		}
+		t.m.lastLesson = c.Folder + "/" + name
 		sec.Lessons = append(sec.Lessons, name)
 		sec.LessonsSinceQuiz++
 		t.m.reading = true
@@ -789,7 +790,7 @@ func (t *writeLesson) save(sectionID, title, content string) tools.Result {
 	if err != nil {
 		return fail(err)
 	}
-	return tools.Result{Output: msg, Display: "Saved " + path}
+	return tools.Result{Output: msg, Display: "Lesson saved"}
 }
 
 func renderLesson(c *Course, sec *Section, n int, title, content string) string {

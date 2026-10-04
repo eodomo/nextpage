@@ -620,10 +620,13 @@ func (m *Model) handleEvent(ev agent.Event) tea.Cmd {
 		m.handleInteraction(e)
 	case agent.Notice:
 		kind := kindNotice
-		if e.Level == agent.NoticeError {
+		switch e.Level {
+		case agent.NoticeError:
 			kind = kindError
-		} else if e.Level == agent.NoticeWarn {
+		case agent.NoticeWarn:
 			kind = kindWarn
+		case agent.NoticeDebug:
+			kind = kindDebug
 		}
 		m.notice(kind, e.Text)
 	case agent.UsageUpdate:

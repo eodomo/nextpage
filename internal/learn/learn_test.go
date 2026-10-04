@@ -197,7 +197,8 @@ ANSWER: A 2x2 matrix`}
 
 func TestCorrectOption(t *testing.T) {
 	opts := []string{"A) four", "B) five", "C) six"}
-	for answer, want := range map[string]int{"B": 1, "b)": 1, "(c)": 2, "2": 1, "five": 1, "B) five": 1, "seven": -1} {
+	for answer, want := range map[string]int{"B": 1, "b)": 1, "(c)": 2, "2": 1, "five": 1, "B) five": 1, "seven": -1,
+		"B;": 1, "**B**": 1, "Option C": 2, "B - five": 1, "c.": 2, "A tree": -1} {
 		if got := correctOption(&Question{Options: opts, Answer: answer}); got != want {
 			t.Errorf("correctOption(%q) = %d, want %d", answer, got, want)
 		}
@@ -271,7 +272,7 @@ func TestInlineSectionsAndCapture(t *testing.T) {
 		t.Fatal("short capture accepted")
 	}
 	res := captured(strings.Repeat("A BST keeps smaller keys on the left. ", 10))
-	if res.IsError || h.m.Awaiting() != "" || !strings.Contains(res.Display, "01 What a BST is - Lesson 1.md") {
+	if res.IsError || h.m.Awaiting() != "" || h.m.LastLesson() != "BSTs/01 What a BST is - Lesson 1.md" {
 		t.Fatalf("capture save: %+v", res)
 	}
 	if h.m.Active().Sections[0].LessonsSinceQuiz != 1 {

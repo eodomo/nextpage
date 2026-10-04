@@ -16,7 +16,6 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -301,15 +300,20 @@ func (s *Server) emit(ev agent.Event) {
 	case agent.ToolStart:
 		s.broadcast(map[string]any{"type": "tool_start", "id": e.Agent + "/" + e.ID, "name": e.Name, "subject": e.Subject, "agent": e.Agent})
 	case agent.ToolEnd:
-		out := e.Result.Display
-		if out == "" || e.Result.IsError {
-			out = e.Result.Output
-		}
-		if len(out) > 2000 {
-			out = out[:2000] + "…"
+		// Failed calls are the model's internal retries: they are logged by
+		// the agent and never shown. Successful ones show their short status.
+		out := ""
+		if !e.Result.IsError {
+			out = e.Result.Display
+			if out == "" && s.cfg.Courses == nil {
+				out = firstLine(e.Result.Output)
+			}
 		}
 		s.broadcast(map[string]any{"type": "tool_end", "id": e.Agent + "/" + e.ID, "name": e.Name, "output": out, "is_error": e.Result.IsError, "open": s.fileToOpen(e)})
 	case agent.Notice:
+		if e.Level == agent.NoticeDebug {
+			return
+		}
 		s.broadcast(map[string]any{"type": "notice", "text": e.Text, "level": int(e.Level)})
 	case agent.UsageUpdate:
 		s.broadcast(map[string]any{"type": "usage", "context": e.ContextTokens, "output": e.Total.CompletionTokens})
@@ -385,10 +389,8 @@ func (s *Server) fileToOpen(e agent.ToolEnd) string {
 	}
 	switch e.Name {
 	case "WriteLesson":
-		if p, ok := strings.CutPrefix(e.Result.Display, "Saved "); ok {
-			if rel, err := filepath.Rel(c.Dir(), p); err == nil {
-				return filepath.ToSlash(rel)
-			}
+		if e.Result.Display == "Lesson saved" {
+			return c.LastLesson()
 		}
 	case "SaveCoursePlan", "OpenCourse":
 		if a := c.Active(); a != nil {
@@ -449,13 +451,15 @@ func (s *Server) history() []historyItem {
 				out = append(out, historyItem{Role: "assistant", Text: m.Content})
 			}
 			for _, tc := range m.ToolCalls {
+				if r, ok := results[tc.ID]; ok && strings.HasPrefix(r.Content, "Error") {
+					continue // internal retries are not shown
+				}
 				it := historyItem{Role: "tool", Name: tc.Name}
 				if t, ok := ag.Tools.Get(tc.Name); ok {
 					it.Subject = tools.Subject(t, tc.Args)
 				}
-				if r, ok := results[tc.ID]; ok {
+				if r, ok := results[tc.ID]; ok && s.cfg.Courses == nil {
 					it.Output = firstLine(r.Content)
-					it.IsError = strings.HasPrefix(r.Content, "Error")
 				}
 				out = append(out, it)
 			}

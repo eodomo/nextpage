@@ -155,15 +155,21 @@ func correctOption(q *Question) int {
 			}
 		}
 	}
-	l := strings.ToUpper(strings.Trim(a, "().: "))
-	if len(l) == 1 && l[0] >= 'A' && int(l[0]-'A') < len(q.Options) {
-		return int(l[0] - 'A')
+	// A letter, tolerating decoration small models add: "B;", "**B**",
+	// "(b)", "Option B", "B - the text". A bare "A tree..." is not a letter.
+	plain := strings.TrimSpace(strings.Trim(a, "*_`\"'"))
+	if m := reAnswerLetter.FindStringSubmatch(plain); m != nil {
+		if i := int(strings.ToUpper(m[1])[0] - 'A'); i < len(q.Options) {
+			return i
+		}
 	}
-	if n, err := strconv.Atoi(l); err == nil && n >= 1 && n <= len(q.Options) {
+	if n, err := strconv.Atoi(strings.Trim(plain, "().:;, ")); err == nil && n >= 1 && n <= len(q.Options) {
 		return n - 1
 	}
 	return -1
 }
+
+var reAnswerLetter = regexp.MustCompile(`(?i)^(?:option\s+|choice\s+)?\(?([a-h])\)?\s*(?:$|[.:;,)\-–])`)
 
 // stripLabel removes a leading "A) " / "B. " style label from an option.
 func stripLabel(s string) string {

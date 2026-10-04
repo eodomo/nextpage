@@ -96,6 +96,20 @@ func (a *Agent) setEmit(emit func(Event)) {
 	a.mu.Unlock()
 }
 
+// debug records harness housekeeping in the log and as a hidden notice.
+func (a *Agent) debug(format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	log.Printf("agent%s: %s", a.logName(), msg)
+	a.emit(Notice{Level: NoticeDebug, Text: msg})
+}
+
+func (a *Agent) logName() string {
+	if a.name == "" {
+		return ""
+	}
+	return "[" + a.name + "]"
+}
+
 func (a *Agent) emit(e Event) {
 	a.mu.Lock()
 	f := a.emitFunc
@@ -158,6 +172,13 @@ func (a *Agent) appendMsg(m llm.Message) {
 	if err := a.Session.Append(m); err != nil {
 		log.Printf("session: %v", err)
 	}
+}
+
+func truncateLog(s string) string {
+	if len(s) > 500 {
+		return s[:500] + "…"
+	}
+	return s
 }
 
 func (a *Agent) appendHarness(content string) {
@@ -242,11 +263,11 @@ func (a *Agent) loop(ctx context.Context) error {
 			continue
 		}
 		if resp.DoneReason == "length" {
-			a.emit(Notice{Level: NoticeWarn, Text: fmt.Sprintf("The reply hit the %d-token output limit (maxTokens) and was cut off.", a.MaxTokens)})
+			a.debug("reply hit the %d-token output limit (maxTokens) and was cut off", a.MaxTokens)
 		}
 		if len(msg.ToolCalls) == 0 && strings.TrimSpace(msg.Content) == "" && nudges < 2 {
 			nudges++
-			a.emit(Notice{Level: NoticeWarn, Text: "The model returned an empty reply; asking it to try again."})
+			a.debug("empty reply; asking the model to try again")
 			nudge := emptyNudge
 			if resp.DoneReason == "length" {
 				nudge = lengthNudge
@@ -257,6 +278,7 @@ func (a *Agent) loop(ctx context.Context) error {
 		if len(msg.ToolCalls) == 0 && nudges < 2 {
 			if name := a.mentionedTool(msg.Content); name != "" {
 				nudges++
+				a.debug("model described %s without calling it; nudging", name)
 				a.appendHarness(fmt.Sprintf(narrationNudge, name))
 				continue
 			}
@@ -264,6 +286,7 @@ func (a *Agent) loop(ctx context.Context) error {
 		if len(msg.ToolCalls) == 0 && a.StopCheck != nil && stopNudges < 4 {
 			if reminder := a.StopCheck(); reminder != "" {
 				stopNudges++
+				a.debug("stop check: %s", reminder)
 				a.appendHarness("[" + reminder + "]")
 				continue
 			}
@@ -310,7 +333,8 @@ func (a *Agent) loop(ctx context.Context) error {
 					lastFailure, repeats = key, 1
 				}
 				if repeats >= 3 {
-					a.emit(Notice{Level: NoticeError, Text: fmt.Sprintf("Stopped: the model repeated the same failing %s call 3 times. Last error: %s", call.Name, res.Output)})
+					log.Printf("agent%s: stopped after 3 identical failing %s calls; last error: %s", a.logName(), call.Name, res.Output)
+					a.emit(Notice{Level: NoticeError, Text: "Sorry, I got stuck on that. Please try again, or rephrase your request."})
 					return nil
 				}
 			} else {
@@ -327,7 +351,8 @@ func (a *Agent) loop(ctx context.Context) error {
 			return err
 		}
 	}
-	a.emit(Notice{Level: NoticeWarn, Text: fmt.Sprintf("Stopped after %d turns (maxTurns).", a.MaxTurns)})
+	log.Printf("agent%s: stopped after %d turns (maxTurns)", a.logName(), a.MaxTurns)
+	a.emit(Notice{Level: NoticeWarn, Text: "I stopped after a lot of steps without finishing. Tell me how to continue."})
 	return nil
 }
 
@@ -439,6 +464,9 @@ func (a *Agent) execTool(ctx context.Context, call llm.ToolCall) (tools.Result, 
 	a.emit(ToolStart{Agent: a.name, ID: call.ID, Name: call.Name, Subject: subject, Input: input})
 
 	finish := func(res tools.Result, err error) (tools.Result, error) {
+		if res.IsError {
+			log.Printf("agent%s: tool %s failed: %s (input: %s)", a.logName(), call.Name, res.Output, truncateLog(string(input)))
+		}
 		a.emit(ToolEnd{Agent: a.name, ID: call.ID, Name: call.Name, Result: res})
 		return res, err
 	}
@@ -538,6 +566,7 @@ func preview(t tools.Tool, input json.RawMessage) string {
 
 func (a *Agent) reportHookErrors(o hooks.Outcome) {
 	for _, e := range o.Errors {
+		log.Printf("agent%s: %s", a.logName(), e)
 		a.emit(Notice{Level: NoticeWarn, Text: e})
 	}
 }
@@ -578,6 +607,9 @@ func (a *Agent) takeCapture(ctx context.Context, text string) bool {
 		return false
 	}
 	res := c.Handle(ctx, text)
+	if res.IsError {
+		log.Printf("agent%s: captured reply for %s rejected: %s", a.logName(), c.Name, res.Output)
+	}
 	if !res.IsError {
 		a.mu.Lock()
 		a.capture = nil

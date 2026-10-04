@@ -93,6 +93,9 @@ const (
 	NoticeInfo NoticeLevel = iota
 	NoticeWarn
 	NoticeError
+	// NoticeDebug is harness housekeeping (retries, nudges). It is always
+	// logged; front ends hide it unless the user asks for verbose output.
+	NoticeDebug
 )
 
 // Notice is a message for the user that is not part of the conversation

@@ -37,6 +37,7 @@ const (
 	kindNotice
 	kindWarn
 	kindError
+	kindDebug // harness housekeeping, shown only in verbose mode
 )
 
 type entry struct {
@@ -77,7 +78,9 @@ func (m *Model) refresh(force bool) {
 			e.cacheW = w
 			e.dirty = false
 		}
-		parts = append(parts, e.cache)
+		if e.cache != "" {
+			parts = append(parts, e.cache)
+		}
 	}
 	content := strings.Join(parts, "\n\n")
 	if len(m.entries) == 0 {
@@ -182,6 +185,11 @@ func (m *Model) render(e *entry, w int) string {
 		return styleWarn.Render(wrap(e.text, w))
 	case kindError:
 		return styleErr.Render(wrap(e.text, w))
+	case kindDebug:
+		if !m.verbose {
+			return ""
+		}
+		return styleDim.Render(wrap("· "+e.text, w))
 	}
 	return e.text
 }
@@ -195,6 +203,11 @@ func displayToolName(name string) string {
 }
 
 func (m *Model) renderTool(e *entry, w int) string {
+	// For the tutor, failed calls are internal retries; show them only in
+	// verbose mode (they are always in the log).
+	if m.d.Courses != nil && e.result != nil && e.result.IsError && !m.verbose {
+		return ""
+	}
 	bullet := styleWarn.Render("○")
 	if e.result != nil {
 		if e.result.IsError {
