@@ -3,8 +3,9 @@
 #   cp example.env .env   # fill in the values
 #   docker compose up -d --build
 #
-# Lessons are written to COURSES_PATH on the host (point it at a folder in your
-# Obsidian vault). The container runs as PUID:PGID so the notes are owned by you.
+# Course notes are kept in the nextpage_courses volume. To write them to a host
+# folder instead (e.g. inside your Obsidian vault), set COURSES_PATH to that
+# folder; the container runs as PUID:PGID so the notes are owned by you.
 services:
   nextpage:
     build: .
@@ -23,7 +24,7 @@ services:
       LOGPATH: /data/nextpage.log
     volumes:
       - nextpage_data:/data
-      - ${COURSES_PATH:?set COURSES_PATH in .env}:/courses
+      - ${COURSES_PATH:-nextpage_courses}:/courses
     networks:
       - traefik
     labels:
@@ -37,6 +38,7 @@ services:
 
 volumes:
   nextpage_data:
+  nextpage_courses:
 
 networks:
   traefik:

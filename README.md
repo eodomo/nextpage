@@ -48,7 +48,7 @@ Courses resume automatically: the most recent unfinished course is active on sta
 | --- | --- |
 | `NEXTPAGE_PASSWORD` | Web login password (required) |
 | `WEB_URL` | Hostname Traefik routes to the app, e.g. `learn.example.com` (required) |
-| `COURSES_PATH` | Host folder (e.g. in your vault) mounted as the courses directory (required) |
+| `COURSES_PATH` | Optional host folder (e.g. in your vault) for course notes; without it they're kept in the `nextpage_courses` volume |
 | `OLLAMASERVER`, `MODEL`, `OLLAMAUSER`, `OLLAMAPASS` | Optional; can be set in the app's Settings instead |
 | `TRAEFIK_NETWORK` | External Traefik network (default `traefik`) |
 | `TRAEFIK_ENTRYPOINT` | HTTPS entrypoint (default `websecure`) |
