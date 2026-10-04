@@ -2,7 +2,7 @@
 
 An AI-driven learning platform built on a Claude Code–style agent harness. Tell it what you want to learn and it runs a personal course:
 
-1. **Placement quiz.** A graded quiz finds out what you already know.
+1. **Adaptive placement quiz.** One question at a time: harder after right answers, easier after wrong ones, until your level (1–5) stops moving. Usually 6–15 questions, with "I don't know" as an honest option.
 2. **Course plan.** Sections ordered around your gaps, with a mermaid diagram of your learning path.
 3. **Lessons.** Markdown notes with LaTeX math, written for Obsidian and aimed at what your quizzes showed you're missing.
 4. **Checkpoints.** A quiz after each section. Pass to move on; otherwise you get a remedial lesson and another try.

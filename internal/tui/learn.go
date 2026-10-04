@@ -48,6 +48,10 @@ func (m *Model) askDirectory(p learn.DirectoryRequest, reply chan any) {
 // startQuiz walks through the questions one dialog at a time and replies
 // with all answers at the end.
 func (m *Model) startQuiz(q learn.QuizRequest, reply chan any) {
+	if q.Adaptive {
+		m.adaptiveQuestion(q, reply)
+		return
+	}
 	answers := make([]string, len(q.Questions))
 	m.add(&entry{kind: kindNotice, text: fmt.Sprintf("📝 %s — %d questions", q.Title, len(q.Questions))})
 	var ask func(i int)
@@ -163,4 +167,32 @@ func (m *Model) deleteCourse(name string) tea.Cmd {
 			return nil
 		})
 	return nil
+}
+
+// adaptiveQuestion shows one question of an adaptive quiz. The agent sends
+// the next one (or finishes) after each answer.
+func (m *Model) adaptiveQuestion(q learn.QuizRequest, reply chan any) {
+	if q.Number == 1 {
+		m.add(&entry{kind: kindNotice, text: "📝 " + q.Title + ": the questions adapt to your answers until your level is clear. Choose \"I don't know\" rather than guessing."})
+	}
+	qq := q.Questions[0]
+	opts := append(append([]string{}, qq.Options...), "I don't know")
+	m.dialog = &dialog{
+		title:      fmt.Sprintf("%s · question %d", q.Title, q.Number),
+		body:       m.markdown(qq.Prompt, m.width-6),
+		options:    opts,
+		textOption: -1,
+		onSelect: func(j int, _ string) tea.Cmd {
+			if j == len(opts)-1 {
+				reply <- []string{""}
+			} else {
+				reply <- []string{opts[j]}
+			}
+			return nil
+		},
+		onCancel: func() tea.Cmd {
+			reply <- []string{""}
+			return nil
+		},
+	}
 }

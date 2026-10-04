@@ -27,6 +27,9 @@ type Question struct {
 	Options     []string `json:"options,omitempty"`
 	Answer      string   `json:"answer"`
 	Explanation string   `json:"explanation,omitempty"`
+	// Level (1-5) and Topic are used by the adaptive placement quiz.
+	Level int    `json:"level,omitempty"`
+	Topic string `json:"topic,omitempty"`
 }
 
 // PublicQuestion is what the user sees: no answers.
@@ -46,6 +49,10 @@ type QuizRequest struct {
 	Title     string           `json:"title"`
 	Course    string           `json:"course"`
 	Questions []PublicQuestion `json:"questions"`
+	// Adaptive quizzes send one question per request; Number counts them.
+	// Front ends should offer an "I don't know" choice (reply "").
+	Adaptive bool `json:"adaptive,omitempty"`
+	Number   int  `json:"number,omitempty"`
 }
 
 // DirectoryRequest asks the user where to keep courses. Reply: a path string.
@@ -80,6 +87,12 @@ type QuizResult struct {
 	Strengths []string         `json:"strengths,omitempty"`
 	Gaps      []string         `json:"gaps,omitempty"`
 	File      string           `json:"file,omitempty"`
+	// Level is the adaptive placement estimate on a 1-5 scale (0 if the
+	// quiz was not adaptive). Percent is not meaningful for adaptive quizzes,
+	// which aim to keep the learner near 50% correct.
+	Level float64 `json:"level,omitempty"`
+	// Levels holds each question's difficulty in an adaptive quiz.
+	Levels []int `json:"levels,omitempty"`
 }
 
 func (q *QuizResult) Ungraded() []QuestionResult {
@@ -267,14 +280,22 @@ func renderQuizNote(c *Course, q *QuizResult) string {
 	if q.Kind == QuizPlacement {
 		status = "placement"
 	}
-	fmt.Fprintf(&b, "---\ntags: [nextpage, quiz]\ncourse: %q\nscore: %d\n---\n\n# %s\n\n**Score:** %d/%d (%d%%) — %s · %s\n\nBack to [[%s]]\n",
-		c.Title, q.Percent, q.Title, q.Score, q.Total, q.Percent, status, q.Time.Format("2006-01-02 15:04"), strings.TrimSuffix(PlanFile, ".md"))
+	fmt.Fprintf(&b, "---\ntags: [nextpage, quiz]\ncourse: %q\nscore: %d\n---\n\n# %s\n\n**Score:** %d/%d (%d%%) — %s · %s\n",
+		c.Title, q.Percent, q.Title, q.Score, q.Total, q.Percent, status, q.Time.Format("2006-01-02 15:04"))
+	if q.Level > 0 {
+		fmt.Fprintf(&b, "\n**Estimated level:** %.1f / 5 (%s). The quiz adapted to your answers, getting harder after right answers and easier after wrong ones, so about half right is expected.\n", q.Level, LevelLabel(q.Level))
+	}
+	fmt.Fprintf(&b, "\nBack to [[%s]]\n", strings.TrimSuffix(PlanFile, ".md"))
 	for i, r := range q.Results {
 		icon := "❌"
 		if r.Correct != nil && *r.Correct {
 			icon = "✅"
 		}
-		fmt.Fprintf(&b, "\n## %d. %s %s\n\n", i+1, icon, r.Prompt)
+		level := ""
+		if q.Level > 0 && i < len(q.Results) {
+			level = fmt.Sprintf(" *(level %s)*", levelOf(q, i))
+		}
+		fmt.Fprintf(&b, "\n## %d. %s %s%s\n\n", i+1, icon, r.Prompt, level)
 		for j, o := range r.Options {
 			fmt.Fprintf(&b, "%c. %s\n", 'A'+j, o)
 		}
@@ -315,6 +336,8 @@ var (
 	reOption   = regexp.MustCompile(`^\s*(?:[-*]\s*)?\(?([A-Ha-h])[).:]\s+(.*)$`)
 	reAnswer   = regexp.MustCompile(`(?i)^\s*(?:\*\*)?(?:correct\s+)?answer\s*(?:\*\*)?\s*:\s*(?:\*\*)?\s*(.*)$`)
 	reExplain  = regexp.MustCompile(`(?i)^\s*(?:\*\*)?explanation\s*(?:\*\*)?\s*:\s*(?:\*\*)?\s*(.*)$`)
+	reLevel    = regexp.MustCompile(`(?i)^\s*(?:\*\*)?(?:level|difficulty)\s*(?:\*\*)?\s*:\s*(?:\*\*)?\s*(\d)`)
+	reTopic    = regexp.MustCompile(`(?i)^\s*(?:\*\*)?(?:topic|subtopic)\s*(?:\*\*)?\s*:\s*(?:\*\*)?\s*(.+)$`)
 )
 
 // ParseQuizText parses questions written as:
@@ -365,12 +388,22 @@ func ParseQuizText(s string) []Question {
 			field = "answer"
 			continue
 		}
+		if m := reLevel.FindStringSubmatch(line); m != nil {
+			cur.Level = int(m[1][0] - '0')
+			field = "level"
+			continue
+		}
+		if m := reTopic.FindStringSubmatch(line); m != nil {
+			cur.Topic = strings.TrimSpace(strings.Trim(m[1], "*"))
+			field = "topic"
+			continue
+		}
 		if m := reExplain.FindStringSubmatch(line); m != nil {
 			cur.Explanation = m[1]
 			field = "explanation"
 			continue
 		}
-		if m := reOption.FindStringSubmatch(line); m != nil && field != "answer" && field != "explanation" {
+		if m := reOption.FindStringSubmatch(line); m != nil && (field == "prompt" || field == "option") {
 			cur.Options = append(cur.Options, strings.TrimSpace(m[2]))
 			field = "option"
 			continue
@@ -396,7 +429,7 @@ func ParseQuizText(s string) []Question {
 var (
 	reInlineQ      = regexp.MustCompile(`([^\n])\s+(Q(?:uestion)?\s*\d*\s*:)`)
 	reInlineOpt    = regexp.MustCompile(`([^\n])\s+\(?([A-H])\)\s+`)
-	reInlineAnswer = regexp.MustCompile(`(?i)([^\n])\s+((?:correct\s+)?answer\s*:|explanation\s*:)`)
+	reInlineAnswer = regexp.MustCompile(`(?i)([^\n])\s+((?:correct\s+)?answer\s*:|explanation\s*:|level\s*:|topic\s*:)`)
 )
 
 // splitInline puts options and ANSWER/EXPLANATION markers that a model wrote
@@ -447,4 +480,12 @@ func (t *TextList) UnmarshalJSON(b []byte) error {
 	}
 	*t = arr
 	return nil
+}
+
+// levelOf reports the difficulty of question i in an adaptive quiz.
+func levelOf(q *QuizResult, i int) string {
+	if i < len(q.Levels) && q.Levels[i] > 0 {
+		return fmt.Sprint(q.Levels[i])
+	}
+	return "?"
 }

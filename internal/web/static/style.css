@@ -309,6 +309,9 @@ textarea { resize: vertical; }
 .opt:has(input:focus-visible) { box-shadow: var(--accent-glow); }
 .quiz-foot { padding: 16px 26px; border-top: 1px solid var(--border); display: flex; align-items: center; gap: 12px; }
 .quiz-foot .count { flex: 1; color: var(--text-dim); font-size: 13px; }
+.quiz-note { margin: 14px 0 0; padding: 10px 14px; border-left: 3px solid var(--accent); background: var(--accent-soft); border-radius: 6px; font-size: 14px; color: var(--text-dim); }
+.quiz-note:empty { display: none; }
+.quiz-wait { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 60px 0; color: var(--text-dim); font: 600 14px var(--font-ui); letter-spacing: .06em; }
 
 /* ---------- settings ---------- */
 .settings { width: min(620px, 100%); }

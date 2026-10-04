@@ -10,7 +10,7 @@ const BasePrompt = `You are nextpage, a patient, rigorous AI tutor. You run pers
 
 # The course workflow (enforced by your tools)
 1. The user names a topic. If it is vague, ask one short clarifying question about their goal, then call StartCourse.
-2. Placement: call GiveQuiz (kind "placement") to find what they already know, from basics to advanced.
+2. Placement: call GiveQuiz (kind "placement"). It runs an adaptive quiz that finds the user's level; you don't write its questions.
 3. Plan: call SaveCoursePlan with ordered sections and a mermaid flowchart of the learning path, shaped by the placement results.
 4. Teach: for the current section, call WriteLesson, then write the whole lesson as your next reply (it is saved to a file). The lesson targets the user's specific gaps.
 5. When the user has read the lesson and is ready, call GiveQuiz (kind "checkpoint") for that section.
@@ -56,8 +56,12 @@ func (m *Manager) StatePrompt() string {
 	}
 
 	fmt.Fprintf(&b, "Active course: %q (topic: %s), folder %q\nPhase: %s\n", c.Title, c.Topic, c.Folder, c.Phase)
-	if c.Placement != nil {
+	if c.Placement != nil && c.Placement.Level > 0 {
+		fmt.Fprintf(&b, "Placement: level %.1f of 5 (%s).", c.Placement.Level, LevelLabel(c.Placement.Level))
+	} else if c.Placement != nil {
 		fmt.Fprintf(&b, "Placement quiz: %d%%.", c.Placement.Percent)
+	}
+	if c.Placement != nil {
 		if len(c.Placement.Strengths) > 0 {
 			fmt.Fprintf(&b, " Strengths: %s.", strings.Join(c.Placement.Strengths, "; "))
 		}
@@ -89,7 +93,7 @@ func (m *Manager) StatePrompt() string {
 			fmt.Fprintf(&b, "- [%s] %s\n  reference: %s\n  user: %s\n", r.ID, r.Prompt, r.Expected, orNone(r.UserAnswer))
 		}
 	case c.Phase == PhasePlacement:
-		b.WriteString("give the placement quiz with GiveQuiz (kind \"placement\", 6-10 questions from basics to advanced).")
+		b.WriteString("give the placement quiz: call GiveQuiz with kind \"placement\" (no questions needed; it adapts to the user automatically).")
 	case c.Phase == PhasePlanning:
 		b.WriteString("design the course with SaveCoursePlan, shaped by the placement results above.")
 	case c.Phase == PhaseLearning:
@@ -133,7 +137,7 @@ func (m *Manager) StopCheck() string {
 	case c.Pending != nil:
 		return "The quiz has short answers waiting: grade them now by calling GradeQuiz."
 	case c.Phase == PhasePlacement:
-		return "The course has started but the placement quiz hasn't been given. Call GiveQuiz with kind \"placement\" now."
+		return "The course has started but the placement quiz hasn't been given. Call GiveQuiz with kind \"placement\" now (no questions needed)."
 	case c.Phase == PhasePlanning:
 		return "The plan isn't saved yet: describing it in chat doesn't save it. Call SaveCoursePlan now."
 	case c.Phase == PhaseLearning:

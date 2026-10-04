@@ -3,10 +3,14 @@ package learn
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/eodomo/nextpage/internal/tools"
 )
@@ -370,5 +374,110 @@ func TestDeleteCourse(t *testing.T) {
 	}
 	if _, err := os.Stat(other); err != nil {
 		t.Fatal("unrelated folder was removed")
+	}
+}
+
+// simulateLearner runs the adaptive placement quiz with a fake model that
+// writes questions tagged with their level, and a learner who answers
+// correctly exactly when the question's level is at most ability.
+func simulateLearner(t *testing.T, ability int) (*QuizResult, []int) {
+	t.Helper()
+	h := newHarness(t)
+	var mu sync.Mutex
+	serial := 0
+	h.env.Complete = func(ctx context.Context, system, prompt string) (string, error) {
+		m := regexp.MustCompile(`level (\d) of 5`).FindStringSubmatch(prompt)
+		mu.Lock()
+		defer mu.Unlock()
+		var b strings.Builder
+		for i := 0; i < 2; i++ {
+			serial++
+			fmt.Fprintf(&b, "Q: L%s question #%d?\nA) right\nB) wrong\nC) also wrong\nD) nope\nANSWER: A\nTOPIC: topic %s\n\n", m[1], serial, m[1])
+		}
+		return b.String(), nil
+	}
+	var levels []int
+	h.env.Interact = func(ctx context.Context, payload any) (any, error) {
+		q := payload.(QuizRequest)
+		if !q.Adaptive || len(q.Questions) != 1 {
+			t.Fatalf("expected one adaptive question, got %+v", q)
+		}
+		level := int(q.Questions[0].Prompt[1] - '0')
+		levels = append(levels, level)
+		if level <= ability {
+			return []string{"right"}, nil
+		}
+		return []string{"wrong"}, nil
+	}
+	h.mustOK("StartCourse", map[string]any{"topic": "anything"})
+	r := h.mustOK("GiveQuiz", map[string]any{"kind": "placement"})
+	if !strings.Contains(r.Display, "Placement done") {
+		t.Fatalf("display = %q", r.Display)
+	}
+	c := h.m.Active()
+	if c.Phase != PhasePlanning || c.Placement == nil {
+		t.Fatalf("phase %s", c.Phase)
+	}
+	return c.Placement, levels
+}
+
+func TestAdaptivePlacement(t *testing.T) {
+	for _, tc := range []struct {
+		ability  int
+		min, max float64
+	}{
+		{3, 2.8, 4.2}, // knows level 3, not 4: lands between them
+		{5, 4.4, 5.5}, // expert
+		{0, 0.5, 1.6}, // knows nothing
+	} {
+		p, levels := simulateLearner(t, tc.ability)
+		if p.Level < tc.min || p.Level > tc.max {
+			t.Errorf("ability %d: estimated %.1f, want %.1f-%.1f (levels asked %v)", tc.ability, p.Level, tc.min, tc.max, levels)
+		}
+		if n := len(levels); n < adaptiveMin || n > adaptiveMax {
+			t.Errorf("ability %d: asked %d questions", tc.ability, n)
+		}
+		t.Logf("ability %d: level %.1f after %d questions %v; strengths %v; gaps %v", tc.ability, p.Level, len(levels), levels, p.Strengths, p.Gaps)
+	}
+}
+
+func TestEstimatorPlateaus(t *testing.T) {
+	e := &estimator{theta: adaptiveStart}
+	for i := 0; i < adaptiveMax && !e.settled(); i++ {
+		e.update(e.target(), e.target() <= 3)
+	}
+	if !e.settled() || e.n >= adaptiveMax {
+		t.Fatalf("did not plateau before the cap: n=%d history=%v", e.n, e.history)
+	}
+}
+
+// A model that stops producing usable questions must end the quiz, not hang.
+func TestAdaptiveGenerationFailure(t *testing.T) {
+	h := newHarness(t)
+	calls := 0
+	var mu sync.Mutex
+	h.env.Complete = func(ctx context.Context, system, prompt string) (string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		calls++
+		if calls > 1 {
+			return "Sorry, I can't help with that.", nil
+		}
+		return "Q: a?\nA) right\nB) wrong\nANSWER: A\n\nQ: b?\nA) right\nB) wrong\nANSWER: A\n\nQ: c?\nA) right\nB) wrong\nANSWER: A\n\nQ: d?\nA) right\nB) wrong\nANSWER: A", nil
+	}
+	h.env.Interact = func(ctx context.Context, payload any) (any, error) { return []string{"right"}, nil }
+	h.mustOK("StartCourse", map[string]any{"topic": "anything"})
+	done := make(chan tools.Result, 1)
+	go func() {
+		b, _ := json.Marshal(map[string]any{"kind": "placement"})
+		done <- h.tools["GiveQuiz"].Run(context.Background(), h.env, b)
+	}()
+	select {
+	case r := <-done:
+		if r.IsError || h.m.Active().Placement == nil || h.m.Active().Placement.Total != 4 {
+			t.Fatalf("expected placement from the 4 available questions, got %+v", r)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("adaptive quiz hung when generation failed")
 	}
 }

@@ -19,6 +19,7 @@ const state = {
   tools: new Map(),  // tool id -> element
   cards: new Map(),  // interaction id -> element
   quizId: null,
+  adaptive: false,   // an adaptive quiz is in progress (overlay stays open between questions)
 };
 
 // ---------- API ----------
@@ -344,6 +345,7 @@ function toolStart(ev) {
 }
 
 function toolEnd(ev, replay) {
+  if (ev.name === 'GiveQuiz' && state.adaptive && !state.quizId) closeQuiz();
   let t = state.tools.get(ev.id);
   if (ev.is_error) {
     // A failed call is the tutor retrying internally; details are in the
@@ -398,7 +400,10 @@ function setWorking(label) {
 function resolveInteraction(id) {
   const card = state.cards.get(id);
   if (card) { card.remove(); state.cards.delete(id); }
-  if (state.quizId === id) closeQuiz();
+  if (state.quizId === id) {
+    if (state.adaptive) quizLoading();
+    else closeQuiz();
+  }
 }
 
 async function reply(id, value) {
@@ -476,15 +481,24 @@ function showInteraction(ev) {
 
 function openQuiz(id, quiz) {
   state.quizId = id;
+  state.adaptive = !!quiz.adaptive;
   $('#quiz-kicker').textContent = (quiz.kind === 'placement' ? 'Placement quiz' : 'Checkpoint') + (quiz.course ? ' · ' + quiz.course : '');
   $('#quiz-title').textContent = quiz.title;
+  $('#quiz-dunno').hidden = !quiz.adaptive;
+  $('#quiz-submit').textContent = quiz.adaptive ? 'Next' : 'Submit answers';
+  $('#quiz-submit').disabled = false;
   const body = $('#quiz-body');
   body.replaceChildren();
+  if (quiz.adaptive) {
+    body.append(el('p', 'quiz-note', quiz.number === 1
+      ? 'This quiz adapts to you: questions get harder when you\'re right and easier when you\'re not, until your level is clear. Pick "I don\'t know" rather than guessing.'
+      : ''));
+  }
   quiz.questions.forEach((q, i) => {
     const box = el('fieldset', 'q');
     box.style.border = '0';
     box.style.margin = '0';
-    box.append(el('div', 'q-num', `QUESTION ${i + 1} OF ${quiz.questions.length}`));
+    box.append(el('div', 'q-num', quiz.adaptive ? `QUESTION ${quiz.number}` : `QUESTION ${i + 1} OF ${quiz.questions.length}`));
     const prompt = el('div', 'q-prompt md');
     fillMarkdown(prompt, q.prompt);
     box.append(prompt);
@@ -518,9 +532,12 @@ function openQuiz(id, quiz) {
       return document.querySelector(`#quiz textarea[name=q${i}]`).value.trim();
     });
     const blank = answers.filter((a) => !a).length;
-    if (blank && !confirm(`${blank} question(s) unanswered. Submit anyway?`)) return;
+    if (quiz.adaptive && blank) return; // use "I don't know" to skip
+    if (!quiz.adaptive && blank && !confirm(`${blank} question(s) unanswered. Submit anyway?`)) return;
+    $('#quiz-submit').disabled = true;
     reply(id, answers);
   };
+  $('#quiz-dunno').onclick = () => { $('#quiz-submit').disabled = true; reply(id, ['']); };
   updateQuizCount();
   $('#quiz-overlay').hidden = false;
   body.scrollTop = 0;
@@ -529,11 +546,26 @@ function openQuiz(id, quiz) {
 function updateQuizCount() {
   const qs = [...document.querySelectorAll('#quiz .q')];
   const done = qs.filter((q) => q.querySelector('input:checked') || q.querySelector('textarea')?.value.trim()).length;
-  $('#quiz-count').textContent = `${done} of ${qs.length} answered`;
+  $('#quiz-count').textContent = state.adaptive ? 'Ends when your level is clear' : `${done} of ${qs.length} answered`;
+}
+
+// Between adaptive questions the overlay stays up while the next question
+// is chosen (and, if needed, written by the model).
+function quizLoading() {
+  state.quizId = null;
+  const body = $('#quiz-body');
+  const wait = el('div', 'quiz-wait');
+  wait.append(el('span', 'rev'), el('span', null, 'Choosing your next question…'));
+  wait.firstChild.append(...Array.from({ length: 5 }, () => el('i')));
+  body.replaceChildren(wait);
+  $('#quiz-dunno').hidden = true;
+  $('#quiz-submit').disabled = true;
+  $('#quiz-count').textContent = '';
 }
 
 function closeQuiz() {
   state.quizId = null;
+  state.adaptive = false;
   $('#quiz-overlay').hidden = true;
 }
 

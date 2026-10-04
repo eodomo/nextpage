@@ -86,6 +86,7 @@ func New(cfg Config) *Agent {
 		cfg.Env.OnTodos = func(t []tools.Todo) { a.emit(TodosUpdate{Todos: t}) }
 		cfg.Env.Interact = a.interact
 		cfg.Env.CaptureReply = a.captureReply
+		cfg.Env.Complete = a.completeText
 	}
 	return a
 }
@@ -583,6 +584,30 @@ func (a *Agent) captureReply(tc tools.Capture) {
 	a.capture = c
 	a.mu.Unlock()
 	a.emit(ToolStart{Agent: a.name, ID: c.id, Name: tc.Name, Subject: "writing…"})
+}
+
+// completeText runs a one-off, tool-less completion for tools.Env.Complete.
+func (a *Agent) completeText(ctx context.Context, system, prompt string) (string, error) {
+	p := a.CurrentProvider()
+	if p == nil {
+		return "", errors.New("no model server is configured")
+	}
+	resp, err := p.Chat(ctx, llm.Request{
+		Model: a.CurrentModel(),
+		Messages: []llm.Message{
+			{Role: llm.RoleSystem, Content: system},
+			{Role: llm.RoleUser, Content: prompt},
+		},
+		Think:   a.thinkOption(),
+		Options: a.options(),
+	}, nil)
+	if err != nil {
+		return "", err
+	}
+	a.mu.Lock()
+	a.usage.Add(resp.Usage)
+	a.mu.Unlock()
+	return resp.Message.Content, nil
 }
 
 func (a *Agent) captureHidden() bool {

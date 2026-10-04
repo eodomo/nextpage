@@ -185,6 +185,11 @@ type Env struct {
 	// CaptureReply asks the agent to hand the model's next plain-text reply
 	// to a tool instead of treating it as a message to the user. See Capture.
 	CaptureReply func(c Capture)
+	// Complete asks the model for text outside the conversation (no tools,
+	// nothing streamed or recorded). Tools use it to generate content on
+	// demand, e.g. the next question of an adaptive quiz. Safe to call
+	// concurrently from a tool's background goroutines.
+	Complete func(ctx context.Context, system, prompt string) (string, error)
 }
 
 func NewEnv(cwd, projectRoot string) *Env {

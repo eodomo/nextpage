@@ -157,8 +157,8 @@ func (*giveQuiz) Name() string     { return "GiveQuiz" }
 func (*giveQuiz) Kind() tools.Kind { return tools.KindInternal }
 func (*giveQuiz) Description() string {
 	return `Presents a quiz to the user and returns their graded answers. Never reveal answers in chat before the quiz.
-- kind "placement": once, right after StartCourse. 6-10 questions from basics to advanced, to find what the user already knows.
-- kind "checkpoint": after the user has read the current section's lesson. 4-8 questions on that section's objectives. The user must reach the pass mark to advance.
+- kind "placement": once, right after StartCourse. Just call GiveQuiz with kind "placement"; you don't write the questions. The quiz adapts to the user (harder after right answers, easier after wrong ones) until their level is clear, and returns an estimated level from 1 (beginner) to 5 (expert) plus their strong and weak subtopics.
+- kind "checkpoint": after the user has read the current section's lesson. 5-8 questions on that section's objectives. The user must reach the pass mark to advance.
 Write the questions in "quiz" as plain text, a blank line between questions:
 
 Q: Which traversal visits a BST's keys in sorted order?
@@ -214,10 +214,14 @@ func (t *giveQuiz) Run(ctx context.Context, env *tools.Env, in json.RawMessage) 
 		if c.Phase != PhasePlacement {
 			return fail(fmt.Errorf("the placement quiz is already done (phase: %s)", c.Phase))
 		}
-		quizID = "placement"
 		if a.Title == "" {
 			a.Title = "Placement Quiz"
 		}
+		if env.Complete != nil && env.Interact != nil {
+			// Questions the model sent (if any) seed the adaptive bank.
+			return t.runAdaptive(ctx, env, c, a.Title, a.Questions)
+		}
+		quizID = "placement"
 		a.SectionID = ""
 	case QuizCheckpoint:
 		if c.Phase != PhaseLearning {
@@ -325,6 +329,9 @@ func quizDisplay(r *QuizResult) string {
 	if len(r.Ungraded()) > 0 {
 		return fmt.Sprintf("%d answers submitted; grading…", len(r.Results))
 	}
+	if r.Level > 0 {
+		return fmt.Sprintf("Placement done after %d questions · level %.1f/5 (%s)", r.Total, r.Level, LevelLabel(r.Level))
+	}
 	verdict := "not passed"
 	if r.Kind == QuizPlacement {
 		verdict = "placement"
@@ -376,7 +383,12 @@ func (m *Manager) apply(c *Course, r *QuizResult) (string, error) {
 	if r.Kind == QuizPlacement {
 		c.Placement = r
 		c.Phase = PhasePlanning
-		return report + "\nPlacement recorded. Briefly tell the user how they did, then design the course with SaveCoursePlan, focusing on what they got wrong and skipping what they clearly know.", nil
+		level := ""
+		if r.Level > 0 {
+			level = fmt.Sprintf("Estimated level: %.1f of 5 (%s). Strong subtopics: %s. Weak subtopics: %s.\n",
+				r.Level, LevelLabel(r.Level), orNone(strings.Join(r.Strengths, "; ")), orNone(strings.Join(r.Gaps, "; ")))
+		}
+		return report + "\n" + level + "Placement recorded. Briefly tell the user what level they are at, then design the course with SaveCoursePlan: start just below their level, skip what they clearly know, and give extra room to their weak subtopics.", nil
 	}
 
 	idx, sec := c.section(r.SectionID)

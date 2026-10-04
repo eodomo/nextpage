@@ -531,8 +531,10 @@ func renderPlan(c *Course, pass int) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "---\ntags: [nextpage, course]\ntopic: %q\nphase: %s\n---\n\n# %s\n\n", c.Topic, c.Phase, c.Title)
 	fmt.Fprintf(&b, "**Topic:** %s  \n**Status:** %s", c.Topic, phaseLabel(c))
-	if c.Placement != nil {
-		fmt.Fprintf(&b, "  \n**Placement quiz:** %d%% ([[%s]])", c.Placement.Percent, strings.TrimSuffix(c.Placement.File, ".md"))
+	if p := c.Placement; p != nil && p.Level > 0 {
+		fmt.Fprintf(&b, "  \n**Starting level:** %.1f / 5, %s ([[%s]])", p.Level, LevelLabel(p.Level), strings.TrimSuffix(p.File, ".md"))
+	} else if p != nil {
+		fmt.Fprintf(&b, "  \n**Placement quiz:** %d%% ([[%s]])", p.Percent, strings.TrimSuffix(p.File, ".md"))
 	}
 	b.WriteString("\n")
 
