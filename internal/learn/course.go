@@ -416,6 +416,36 @@ func (m *Manager) Open(name string) (*Course, error) {
 	return c, nil
 }
 
+// Delete removes a course folder and everything in it. Only folders that
+// hold a course state file are removed, so a bad name can never delete
+// anything else in the courses directory.
+func (m *Manager) Delete(name string) (string, error) {
+	s, ok := m.find(name)
+	if !ok {
+		return "", fmt.Errorf("no course named %q", name)
+	}
+	dir := m.Dir()
+	path := filepath.Join(dir, s.Folder)
+	if rel, err := filepath.Rel(dir, path); err != nil || rel != s.Folder || strings.Contains(rel, string(filepath.Separator)) {
+		return "", fmt.Errorf("invalid course folder %q", s.Folder)
+	}
+	if _, err := os.Stat(filepath.Join(path, stateFile)); err != nil {
+		return "", fmt.Errorf("%q is not a course folder", s.Folder)
+	}
+	if err := os.RemoveAll(path); err != nil {
+		return "", err
+	}
+	m.mu.Lock()
+	if m.active != nil && m.active.Folder == s.Folder {
+		m.active = nil
+		m.awaitingReply = ""
+		m.reading = false
+	}
+	m.mu.Unlock()
+	m.changed()
+	return s.Folder, nil
+}
+
 // Files lists the notes in a course folder (plan first, then lessons in
 // order, then quizzes) as paths relative to the courses directory.
 func (m *Manager) Files(folder string) []string {

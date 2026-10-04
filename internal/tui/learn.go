@@ -109,11 +109,14 @@ func orBlank(s string) string {
 	return s
 }
 
-func (m *Model) cmdCourses(string) tea.Cmd {
+func (m *Model) cmdCourses(args string) tea.Cmd {
 	c := m.d.Courses
 	if c == nil {
 		m.notice(kindNotice, "Courses are only available in the learn profile (--profile learn).")
 		return nil
+	}
+	if name, ok := strings.CutPrefix(args, "delete"); ok {
+		return m.deleteCourse(strings.TrimSpace(name))
 	}
 	var b strings.Builder
 	if c.Dir() == "" {
@@ -131,8 +134,33 @@ func (m *Model) cmdCourses(string) tea.Cmd {
 			}
 			fmt.Fprintf(&b, "  %s — %s, %d/%d sections passed%s\n", s.Folder, s.Phase, s.Passed, s.Sections, active)
 		}
-		b.WriteString("\nSay \"continue <course>\" to pick one up again.")
+		b.WriteString("\nSay \"continue <course>\" to pick one up again, or /courses delete <course> to remove one.")
 	}
 	m.notice(kindNotice, strings.TrimRight(b.String(), "\n"))
+	return nil
+}
+
+func (m *Model) deleteCourse(name string) tea.Cmd {
+	if name == "" {
+		m.notice(kindWarn, "Usage: /courses delete <course name>")
+		return nil
+	}
+	if m.running {
+		m.notice(kindWarn, "Wait for the tutor to finish (or press esc) before deleting a course.")
+		return nil
+	}
+	m.openPicker(fmt.Sprintf("Delete the course %q and all its lessons and quizzes? This can't be undone.", name),
+		[]string{"Keep it", "Delete it"}, func(i int) tea.Cmd {
+			if i != 1 {
+				return nil
+			}
+			folder, err := m.d.Courses.Delete(name)
+			if err != nil {
+				m.notice(kindError, err.Error())
+			} else {
+				m.notice(kindNotice, "Deleted course "+folder+".")
+			}
+			return nil
+		})
 	return nil
 }

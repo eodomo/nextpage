@@ -305,7 +305,9 @@ func run() error {
 			return fmt.Errorf("resume %s: %w", opts.resume, err)
 		}
 		store, err = session.Open(sessionDir, opts.resume)
-	case opts.continueLast:
+	case opts.continueLast || opts.web:
+		// The web app picks up its last conversation, so a restart or
+		// redeploy doesn't wipe the chat.
 		if list := session.List(sessionDir); len(list) > 0 {
 			history, _ = session.Load(list[0].Path)
 			store, err = session.Open(sessionDir, list[0].ID)

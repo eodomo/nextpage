@@ -101,6 +101,7 @@ func Serve(ctx context.Context, cfg Config) error {
 	mux.HandleFunc("POST /api/new", s.api(s.newConversation))
 	mux.HandleFunc("GET /api/courses", s.api(s.courses))
 	mux.HandleFunc("GET /api/file", s.api(s.file))
+	mux.HandleFunc("POST /api/courses/delete", s.api(s.deleteCourse))
 	mux.HandleFunc("GET /api/settings", s.api(s.getSettings))
 	mux.HandleFunc("POST /api/settings", s.api(s.saveSettings))
 	mux.HandleFunc("POST /api/settings/test", s.api(s.testSettings))
@@ -605,6 +606,34 @@ func (s *Server) courses(w http.ResponseWriter, r *http.Request) {
 		list = append(list, course{Summary: sum, Files: c.Files(sum.Folder)})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"dir": c.Dir(), "courses": list})
+}
+
+func (s *Server) deleteCourse(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.Courses == nil {
+		http.NotFound(w, r)
+		return
+	}
+	var req struct {
+		Folder string `json:"folder"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Folder == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "which course?"})
+		return
+	}
+	s.mu.Lock()
+	running := s.running
+	s.mu.Unlock()
+	if running {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "wait for the tutor to finish (or stop it) before deleting a course"})
+		return
+	}
+	folder, err := s.cfg.Courses.Delete(req.Folder)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	log.Printf("web: deleted course %q", folder)
+	writeJSON(w, http.StatusOK, map[string]string{"deleted": folder})
 }
 
 func (s *Server) file(w http.ResponseWriter, r *http.Request) {

@@ -184,6 +184,11 @@ function renderCourses() {
     fill.style.width = pct + '%';
     bar.append(fill);
     head.append(bar);
+    const del = el('button', 'course-delete', '×');
+    del.type = 'button';
+    del.title = 'Delete this course';
+    del.setAttribute('aria-label', `Delete course ${c.title}`);
+    del.onclick = (e) => { e.stopPropagation(); deleteCourse(c); };
     const list = el('ul', 'files');
     list.hidden = !(c.active || c.folder === activeFolder);
     head.onclick = () => { list.hidden = !list.hidden; };
@@ -200,9 +205,25 @@ function renderCourses() {
       li.append(b);
       list.append(li);
     }
-    wrap.append(head, list);
+    wrap.append(del, head, list);
     box.append(wrap);
   }
+}
+
+async function deleteCourse(c) {
+  if (!confirm(`Delete the course "${c.title}" and all of its lessons and quizzes? This can't be undone.`)) return;
+  try {
+    await api('/api/courses/delete', { folder: c.folder });
+  } catch (err) {
+    alert(err.message);
+    return;
+  }
+  if (state.openPath.startsWith(c.folder + '/')) {
+    state.openPath = '';
+    $('#reader-title').textContent = 'Reader';
+    $('#reader').replaceChildren(el('div', 'empty', `Deleted "${c.title}".`));
+  }
+  loadCourses();
 }
 
 async function openFile(path, { focus = true } = {}) {

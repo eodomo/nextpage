@@ -344,3 +344,30 @@ func TestQuizAsCapturedReply(t *testing.T) {
 		t.Fatalf("captured quiz: %+v phase=%s", res, h.m.Active().Phase)
 	}
 }
+
+func TestDeleteCourse(t *testing.T) {
+	h := newHarness(t)
+	h.mustOK("StartCourse", map[string]any{"topic": "driving", "title": "Driving Manual"})
+	other := filepath.Join(h.m.Dir(), "Not A Course")
+	os.MkdirAll(other, 0o755)
+
+	if _, err := h.m.Delete("../.."); err == nil {
+		t.Fatal("deleted outside the courses dir")
+	}
+	if _, err := h.m.Delete("Not A Course"); err == nil {
+		t.Fatal("deleted a folder without course state")
+	}
+	folder, err := h.m.Delete("driving")
+	if err != nil || folder != "Driving Manual" {
+		t.Fatalf("delete: %q %v", folder, err)
+	}
+	if _, err := os.Stat(filepath.Join(h.m.Dir(), "Driving Manual")); !os.IsNotExist(err) {
+		t.Fatal("folder still exists")
+	}
+	if h.m.Active() != nil {
+		t.Fatal("deleted course is still active")
+	}
+	if _, err := os.Stat(other); err != nil {
+		t.Fatal("unrelated folder was removed")
+	}
+}

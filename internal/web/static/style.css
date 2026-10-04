@@ -144,13 +144,22 @@ textarea { resize: vertical; }
 
 /* ---------- sidebar ---------- */
 .sidebar { background: var(--surface); }
-.course { border-bottom: 1px solid var(--border); }
+.course { border-bottom: 1px solid var(--border); position: relative; }
+.course-delete {
+  position: absolute; top: 8px; right: 8px; z-index: 1;
+  width: 26px; height: 26px; border-radius: 6px; border: 1px solid transparent;
+  background: none; color: var(--text-faint); font-size: 18px; line-height: 1; cursor: pointer;
+  opacity: 0; transition: opacity .15s, color .15s, border-color .15s;
+}
+.course:hover .course-delete, .course-delete:focus-visible { opacity: 1; }
+.course-delete:hover { color: var(--accent); border-color: var(--accent); }
+@media (hover: none) { .course-delete { opacity: 1; } }
 .course-head {
   width: 100%; text-align: left; background: none; border: 0; cursor: pointer;
   padding: 12px 16px; display: flex; flex-direction: column; gap: 6px;
 }
 .course-head:hover { background: var(--surface-2); }
-.course-title { font: 600 15px var(--font-ui); display: flex; align-items: center; gap: 8px; }
+.course-title { font: 600 15px var(--font-ui); display: flex; align-items: center; gap: 8px; padding-right: 28px; }
 .course.active .course-title::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
 .course-meta { font-size: 12px; color: var(--text-dim); }
 .progress { height: 3px; background: var(--surface-3); border-radius: 3px; overflow: hidden; }
